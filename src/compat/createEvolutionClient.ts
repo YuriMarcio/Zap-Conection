@@ -1,5 +1,5 @@
 import { EvolutionClient } from './EvolutionClient.js';
-import type { EvolutionClientConfig } from './contracts/types.js';
+import type { EvolutionClientConfig } from './types.js';
 
 /**
  * Cria um EvolutionClient a partir de variáveis de ambiente.

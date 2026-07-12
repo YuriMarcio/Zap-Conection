@@ -1,0 +1,310 @@
+import axios from 'axios';
+import { z } from 'zod';
+import type {
+  ButtonsContent,
+  CarouselContent,
+  CarouselProviderOptions,
+  CommunicationProvider,
+  ConnectResult,
+  InstanceStatus,
+  ListContent,
+  SendResult,
+  SendTextOptions,
+  WebhookConfig,
+} from '../../core/interfaces/CommunicationProvider.js';
+import type { EventPublisher } from '../../core/interfaces/EventPublisher.js';
+import type { Logger } from '../../core/interfaces/Logger.js';
+import { UnsupportedProviderOperationException } from '../../core/exceptions/UnsupportedProviderOperationException.js';
+import { InstanceConnected } from '../../core/events/index.js';
+import { ProviderHttpClient } from '../../infrastructure/http/ProviderHttpClient.js';
+import type { MetaProviderConfig } from '../../contracts/dto/index.js';
+import {
+  MetaButtonsContentSchema,
+  MetaCarouselProviderOptionsSchema,
+  MetaListContentSchema,
+} from '../../contracts/schemas/meta.js';
+
+/**
+ * Adapter da Meta Cloud API (WhatsApp Business Platform). Diferente da Evolution/Z-API, aqui
+ * não existe conceito de instância/QR code — o número é provisionado fora da API (Meta
+ * Business Manager / Embedded Signup) e fica fixo por client (config.phoneNumberId).
+ * `instanceId` é aceito nos métodos só para respeitar a interface CommunicationProvider (e
+ * aparece nos eventos/logs), mas não influencia qual número é usado.
+ */
+export class MetaCloudApiProvider implements CommunicationProvider {
+  readonly name = 'meta' as const;
+  private readonly http: ProviderHttpClient;
+  private readonly phoneNumberId: string;
+  private readonly wabaId: string | undefined;
+
+  constructor(
+    config: MetaProviderConfig,
+    private readonly logger: Logger,
+    private readonly eventPublisher?: EventPublisher,
+  ) {
+    this.phoneNumberId = config.phoneNumberId;
+    this.wabaId = config.wabaId;
+
+    const axiosInstance = axios.create({
+      baseURL: `https://graph.facebook.com/${config.apiVersion ?? 'v23.0'}`,
+      timeout: config.timeout ?? 15_000,
+      headers: { Authorization: `Bearer ${config.accessToken}`, 'Content-Type': 'application/json' },
+    });
+
+    this.http = new ProviderHttpClient({
+      provider: this.name,
+      axiosInstance,
+      logger,
+      throwOnError: config.throwOnError ?? false,
+    });
+  }
+
+  // ==========================================================================
+  // Conexão / instância — sem QR/ciclo de conexão real na Cloud API
+  // ==========================================================================
+
+  async connect(instanceId: string): Promise<ConnectResult> {
+    const raw = await this.http.get<Record<string, unknown>>(
+      `/${this.phoneNumberId}?fields=verified_name,code_verification_status,quality_rating`,
+    );
+    this.eventPublisher?.publish(InstanceConnected(this.name, instanceId));
+    return { status: 'connected', raw };
+  }
+
+  async disconnect(): Promise<void> {
+    throw new UnsupportedProviderOperationException(
+      this.name,
+      'disconnect',
+      'Números na Cloud API são gerenciados no Meta Business Manager; não existe endpoint para desconectar via API.',
+    );
+  }
+
+  async getStatus(instanceId: string): Promise<InstanceStatus> {
+    const raw = await this.http.get<Record<string, unknown>>(
+      `/${this.phoneNumberId}?fields=verified_name,code_verification_status,quality_rating`,
+    );
+    return { instanceId, state: 'open', raw };
+  }
+
+  /**
+   * Só é possível inscrever o app atual na WABA (`subscribed_apps`) — a URL de callback em
+   * si só pode ser configurada manualmente no App Dashboard da Meta, não existe chamada de
+   * API para isso. Se `config` pedir os eventos exclusivos de Coexistence (`history`,
+   * `smb_app_state_sync`, `smb_message_echoes`), essas chaves também precisam ser marcadas
+   * manualmente no App Dashboard.
+   */
+  async setWebhook(_instanceId: string, config: WebhookConfig): Promise<void> {
+    if (!this.wabaId) {
+      throw new UnsupportedProviderOperationException(
+        this.name,
+        'setWebhook',
+        'wabaId não configurado — necessário para inscrever o app na WABA via /subscribed_apps.',
+      );
+    }
+
+    await this.http.post(`/${this.wabaId}/subscribed_apps`);
+    this.logger.warn(
+      'App inscrito na WABA, mas a URL de callback ainda precisa ser configurada manualmente no App Dashboard da Meta (não existe chamada de API para isso).',
+      { provider: this.name, url: config.url },
+    );
+  }
+
+  async checkNumbers(): Promise<string[]> {
+    throw new UnsupportedProviderOperationException(
+      this.name,
+      'checkNumbers',
+      'Cloud API não expõe um endpoint público de validação em lote de números.',
+    );
+  }
+
+  // ==========================================================================
+  // Mensagens
+  // ==========================================================================
+
+  async sendText(_instanceId: string, to: string, text: string, _options?: SendTextOptions): Promise<SendResult> {
+    const raw = await this.sendMessage(to, 'text', { body: text });
+    return this.toSendResult(raw);
+  }
+
+  async sendImage(_instanceId: string, to: string, mediaUrl: string, caption?: string): Promise<SendResult> {
+    const raw = await this.sendMessage(to, 'image', { link: mediaUrl, caption });
+    return this.toSendResult(raw);
+  }
+
+  async sendAudio(_instanceId: string, to: string, mediaUrl: string): Promise<SendResult> {
+    const raw = await this.sendMessage(to, 'audio', { link: mediaUrl });
+    return this.toSendResult(raw);
+  }
+
+  async sendVideo(_instanceId: string, to: string, mediaUrl: string, caption?: string): Promise<SendResult> {
+    const raw = await this.sendMessage(to, 'video', { link: mediaUrl, caption });
+    return this.toSendResult(raw);
+  }
+
+  async sendDocument(_instanceId: string, to: string, mediaUrl: string, fileName: string): Promise<SendResult> {
+    const raw = await this.sendMessage(to, 'document', { link: mediaUrl, filename: fileName });
+    return this.toSendResult(raw);
+  }
+
+  async sendLocation(
+    _instanceId: string,
+    to: string,
+    latitude: number,
+    longitude: number,
+    name?: string,
+    address?: string,
+  ): Promise<SendResult> {
+    const raw = await this.sendMessage(to, 'location', { latitude, longitude, name, address });
+    return this.toSendResult(raw);
+  }
+
+  async sendReaction(_instanceId: string, to: string, messageId: string, emoji: string): Promise<SendResult> {
+    const raw = await this.sendMessage(to, 'reaction', { message_id: messageId, emoji });
+    return this.toSendResult(raw);
+  }
+
+  async sendButtons(_instanceId: string, to: string, content: ButtonsContent): Promise<SendResult> {
+    const parsed = this.validate(MetaButtonsContentSchema, content, 'sendButtons');
+
+    const raw = await this.sendMessage(to, 'interactive', {
+      type: 'button',
+      ...(parsed.title || parsed.imageUrl
+        ? { header: parsed.imageUrl ? { type: 'image', image: { link: parsed.imageUrl } } : { type: 'text', text: parsed.title } }
+        : {}),
+      body: { text: parsed.body },
+      ...(parsed.footer ? { footer: { text: parsed.footer } } : {}),
+      action: {
+        buttons: parsed.buttons.map((button) => ({ type: 'reply', reply: { id: button.id, title: button.displayText } })),
+      },
+    });
+    return this.toSendResult(raw);
+  }
+
+  async sendList(_instanceId: string, to: string, content: ListContent): Promise<SendResult> {
+    const parsed = this.validate(MetaListContentSchema, content, 'sendList');
+
+    const raw = await this.sendMessage(to, 'interactive', {
+      type: 'list',
+      header: { type: 'text', text: parsed.title },
+      body: { text: parsed.description },
+      ...(parsed.footer ? { footer: { text: parsed.footer } } : {}),
+      action: {
+        button: parsed.buttonText,
+        sections: parsed.sections.map((section) => ({
+          title: section.title,
+          rows: section.rows.map((row) => ({ id: row.rowId, title: row.title, description: row.description })),
+        })),
+      },
+    });
+    return this.toSendResult(raw);
+  }
+
+  /**
+   * Diferente da Evolution/Z-API (carrossel freeform), na Cloud API o carrossel só existe
+   * como template pré-aprovado — exige providerOptions.templateName + languageCode. O
+   * mapeamento de cards para components é best-effort: a estrutura real de parâmetros por
+   * card precisa bater exatamente com o que foi declarado ao criar o template na Meta.
+   */
+  async sendCarousel(
+    _instanceId: string,
+    to: string,
+    content: CarouselContent,
+    providerOptions?: CarouselProviderOptions,
+  ): Promise<SendResult> {
+    const parsedOptions = MetaCarouselProviderOptionsSchema.safeParse(providerOptions ?? {});
+    if (!parsedOptions.success) {
+      throw new UnsupportedProviderOperationException(
+        this.name,
+        'sendCarousel',
+        'Cloud API exige um template de carrossel pré-aprovado — informe providerOptions.templateName e languageCode.',
+      );
+    }
+
+    const raw = await this.http.post(`/${this.phoneNumberId}/messages`, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'template',
+      template: {
+        name: parsedOptions.data.templateName,
+        language: { code: parsedOptions.data.languageCode },
+        components: [
+          { type: 'body', parameters: [{ type: 'text', text: content.body }] },
+          {
+            type: 'carousel',
+            cards: content.cards.map((card, index) => ({
+              card_index: index,
+              components: [
+                ...(card.imageUrl ? [{ type: 'header', parameters: [{ type: 'image', image: { link: card.imageUrl } }] }] : []),
+                { type: 'body', parameters: [{ type: 'text', text: card.body }] },
+                ...(card.buttons[0]
+                  ? [
+                      {
+                        type: 'button',
+                        sub_type: 'quick_reply',
+                        index: '0',
+                        parameters: [{ type: 'payload', payload: card.buttons[0].id }],
+                      },
+                    ]
+                  : []),
+              ],
+            })),
+          },
+        ],
+      },
+    });
+    return this.toSendResult(raw);
+  }
+
+  // ==========================================================================
+  // Coexistence — exclusivo da Cloud API, sem equivalente na CommunicationProvider
+  // (Evolution/Z-API não têm esse conceito).
+  // ==========================================================================
+
+  async getPhoneNumberInfo(): Promise<{ isOnBizApp: boolean; platformType: string | undefined; raw: unknown }> {
+    const raw = await this.http.get<{ is_on_biz_app?: boolean; platform_type?: string }>(
+      `/${this.phoneNumberId}?fields=is_on_biz_app,platform_type`,
+    );
+    return { isOnBizApp: raw.is_on_biz_app ?? false, platformType: raw.platform_type, raw };
+  }
+
+  async syncContacts(): Promise<void> {
+    await this.http.post(`/${this.phoneNumberId}/smb_app_data`, {
+      messaging_product: 'whatsapp',
+      sync_type: 'smb_app_state_sync',
+    });
+  }
+
+  async syncHistory(): Promise<void> {
+    await this.http.post(`/${this.phoneNumberId}/smb_app_data`, {
+      messaging_product: 'whatsapp',
+      sync_type: 'history',
+    });
+  }
+
+  // ==========================================================================
+
+  private async sendMessage(to: string, type: string, content: unknown): Promise<unknown> {
+    return this.http.post(`/${this.phoneNumberId}/messages`, {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type,
+      [type]: content,
+    });
+  }
+
+  private validate<T extends z.ZodTypeAny>(schema: T, content: unknown, operation: string): z.infer<T> {
+    const result = schema.safeParse(content);
+    if (!result.success) {
+      const issues = result.error.issues.map((issue) => issue.message).join('; ');
+      throw new Error(`[meta] conteúdo inválido para ${operation}: ${issues}`);
+    }
+    return result.data;
+  }
+
+  private toSendResult(raw: unknown): SendResult {
+    const messageId = (raw as { messages?: Array<{ id?: string }> } | undefined)?.messages?.[0]?.id;
+    return { messageId, raw };
+  }
+}
