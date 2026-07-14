@@ -1,5 +1,5 @@
 import axios, { type AxiosInstance, type AxiosResponse } from 'axios';
-import { EvolutionApiError } from './exceptions/EvolutionApiError.js';
+import { EvolutionApiError } from './EvolutionApiError.js';
 import type {
   CarouselCard,
   CreateInstanceOptions,
@@ -10,7 +10,7 @@ import type {
   ReplyButton,
   WebhookOptions,
   WhatsAppNumberResult,
-} from './contracts/types.js';
+} from './types.js';
 
 export class EvolutionClient implements IEvolutionClient {
   private readonly http: AxiosInstance;

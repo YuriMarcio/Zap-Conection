@@ -1,0 +1,300 @@
+import axios from 'axios';
+import type {
+  ButtonsContent,
+  CarouselContent,
+  CarouselProviderOptions,
+  CommunicationProvider,
+  ConnectResult,
+  InstanceStatus,
+  ListContent,
+  SendResult,
+  SendTextOptions,
+  WebhookConfig,
+} from '../../core/interfaces/CommunicationProvider.js';
+import type { EventPublisher } from '../../core/interfaces/EventPublisher.js';
+import type { Logger } from '../../core/interfaces/Logger.js';
+import { PhoneNumber } from '../../core/value-objects/PhoneNumber.js';
+import {
+  ConnectionLost,
+  InstanceConnected,
+  InstanceDisconnected,
+  MessageDelivered,
+  MessageRead,
+  MessageReceived,
+  QRCodeGenerated,
+  type DomainEvent,
+} from '../../core/events/index.js';
+import { ProviderHttpClient } from '../../infrastructure/http/ProviderHttpClient.js';
+import type { EvolutionProviderConfig } from '../../contracts/dto/index.js';
+
+export class EvolutionProvider implements CommunicationProvider {
+  readonly name = 'evolution' as const;
+  private readonly http: ProviderHttpClient;
+
+  constructor(
+    config: EvolutionProviderConfig,
+    private readonly logger: Logger,
+    private readonly eventPublisher?: EventPublisher,
+  ) {
+    const axiosInstance = axios.create({
+      baseURL: config.baseUrl.replace(/\/$/, ''),
+      timeout: config.timeout ?? 15_000,
+      headers: { apikey: config.apiKey, 'Content-Type': 'application/json' },
+    });
+
+    this.http = new ProviderHttpClient({
+      provider: this.name,
+      axiosInstance,
+      logger,
+      throwOnError: config.throwOnError ?? false,
+    });
+  }
+
+  // ==========================================================================
+  // Conexão / instância
+  // ==========================================================================
+
+  async connect(instanceId: string): Promise<ConnectResult> {
+    await this.http.post('/instance/create', {
+      instanceName: instanceId,
+      qrcode: true,
+      integration: 'WHATSAPP-BAILEYS',
+    });
+
+    const raw = await this.http.get<Record<string, unknown>>(`/instance/connect/${instanceId}`);
+    const qrCode = this.extractQrCode(raw);
+
+    if (qrCode) {
+      this.eventPublisher?.publish(QRCodeGenerated(this.name, instanceId, { qrCode }));
+    }
+
+    return { status: qrCode ? 'qr_required' : 'connecting', qrCode, raw };
+  }
+
+  async disconnect(instanceId: string): Promise<void> {
+    await this.http.delete(`/instance/delete/${instanceId}`);
+    this.eventPublisher?.publish(InstanceDisconnected(this.name, instanceId));
+  }
+
+  async getStatus(instanceId: string): Promise<InstanceStatus> {
+    const raw = await this.http.get<{ instance?: { state?: 'open' | 'close' | 'connecting' } }>(
+      `/instance/connectionState/${instanceId}`,
+    );
+    const state = raw.instance?.state ?? 'close';
+
+    if (state === 'open') {
+      this.eventPublisher?.publish(InstanceConnected(this.name, instanceId));
+    }
+
+    return { instanceId, state, raw };
+  }
+
+  async setWebhook(instanceId: string, config: WebhookConfig): Promise<void> {
+    await this.http.post(`/webhook/set/${instanceId}`, {
+      webhook: {
+        enabled: config.enabled,
+        url: config.url,
+        events: config.events ?? ['MESSAGES_UPSERT'],
+      },
+    });
+  }
+
+  /**
+   * Valida em lote quais números existem no WhatsApp. Sempre chamar antes de disparos em
+   * lote — enviar para números inexistentes aumenta o score de ban da instância Baileys.
+   */
+  async checkNumbers(instanceId: string, numbers: string[]): Promise<string[]> {
+    if (numbers.length === 0) return [];
+
+    const results = await this.http.post<Array<{ jid: string; exists: boolean }>>(
+      `/chat/whatsappNumbers/${instanceId}`,
+      { numbers },
+    );
+
+    if (!Array.isArray(results)) {
+      this.logger.warn('checkNumbers: resposta inesperada', { provider: this.name, instanceId });
+      return [];
+    }
+
+    return results.filter((item) => item.exists === true).map((item) => PhoneNumber.create(item.jid).toString());
+  }
+
+  // ==========================================================================
+  // Mensagens
+  // ==========================================================================
+
+  async sendText(instanceId: string, to: string, text: string, options?: SendTextOptions): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendText/${instanceId}`, {
+      number: to,
+      text,
+      delay: options?.delayMs ?? 1200,
+    });
+    return this.toSendResult(raw);
+  }
+
+  async sendImage(instanceId: string, to: string, mediaUrl: string, caption = ''): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendMedia/${instanceId}`, {
+      number: to,
+      mediatype: 'image',
+      media: mediaUrl,
+      caption,
+    });
+    return this.toSendResult(raw);
+  }
+
+  async sendAudio(instanceId: string, to: string, mediaUrl: string): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendWhatsAppAudio/${instanceId}`, { number: to, audio: mediaUrl });
+    return this.toSendResult(raw);
+  }
+
+  async sendVideo(instanceId: string, to: string, mediaUrl: string, caption = ''): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendMedia/${instanceId}`, {
+      number: to,
+      mediatype: 'video',
+      media: mediaUrl,
+      caption,
+    });
+    return this.toSendResult(raw);
+  }
+
+  async sendDocument(instanceId: string, to: string, mediaUrl: string, fileName: string): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendMedia/${instanceId}`, {
+      number: to,
+      mediatype: 'document',
+      media: mediaUrl,
+      fileName,
+    });
+    return this.toSendResult(raw);
+  }
+
+  async sendLocation(
+    instanceId: string,
+    to: string,
+    latitude: number,
+    longitude: number,
+    name?: string,
+    address?: string,
+  ): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendLocation/${instanceId}`, {
+      number: to,
+      latitude,
+      longitude,
+      name,
+      address,
+    });
+    return this.toSendResult(raw);
+  }
+
+  async sendButtons(instanceId: string, to: string, content: ButtonsContent): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendButtons/${instanceId}`, {
+      number: to,
+      title: content.title,
+      description: content.body,
+      footer: content.footer,
+      thumbnailUrl: content.imageUrl,
+      buttons: content.buttons.map((button) => ({ type: 'reply', displayText: button.displayText, id: button.id })),
+      delay: 1000,
+    });
+    return this.toSendResult(raw);
+  }
+
+  async sendList(instanceId: string, to: string, content: ListContent): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendList/${instanceId}`, {
+      number: to,
+      title: content.title,
+      description: content.description,
+      buttonText: content.buttonText,
+      footerText: content.footer,
+      sections: content.sections,
+    });
+    return this.toSendResult(raw);
+  }
+
+  async sendCarousel(
+    instanceId: string,
+    to: string,
+    content: CarouselContent,
+    _providerOptions?: CarouselProviderOptions,
+  ): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendCarousel/${instanceId}`, {
+      number: to,
+      body: content.body,
+      cards: content.cards,
+      delay: 1000,
+    });
+    return this.toSendResult(raw);
+  }
+
+  async sendReaction(instanceId: string, to: string, messageId: string, emoji: string): Promise<SendResult> {
+    const raw = await this.http.post(`/message/sendReaction/${instanceId}`, {
+      reactionMessage: {
+        key: { remoteJid: PhoneNumber.create(to).toJid(), fromMe: false, id: messageId },
+        reaction: emoji,
+      },
+    });
+    return this.toSendResult(raw);
+  }
+
+  // ==========================================================================
+  // Webhook inbound
+  // ==========================================================================
+
+  /**
+   * Normaliza o payload de webhook da Evolution (`{ event, instance, data }`). Mapeamento
+   * best-effort a partir dos eventos documentados (messages.upsert, messages.update,
+   * connection.update) — validar contra uma instância real antes de depender em produção.
+   */
+  parseWebhookPayload(rawBody: Buffer, _headers: Record<string, string>): DomainEvent[] {
+    const body = JSON.parse(rawBody.toString('utf8')) as {
+      event?: string;
+      instance?: string;
+      data?: Record<string, unknown>;
+    };
+    const instanceId = body.instance ?? 'unknown';
+    const data = body.data ?? {};
+
+    switch (body.event) {
+      case 'messages.upsert': {
+        const key = data['key'] as { id?: string; remoteJid?: string; fromMe?: boolean } | undefined;
+        if (key?.fromMe) return [];
+        return [
+          MessageReceived(this.name, instanceId, {
+            from: key?.remoteJid ? PhoneNumber.create(key.remoteJid).toString() : 'unknown',
+            messageId: key?.id ?? '',
+            content: data['message'],
+          }),
+        ];
+      }
+      case 'messages.update': {
+        const key = data['key'] as { id?: string } | undefined;
+        const messageId = key?.id ?? '';
+        const status = String(data['status'] ?? '').toUpperCase();
+        if (status === 'READ') return [MessageRead(this.name, instanceId, { messageId })];
+        if (status === 'DELIVERY_ACK' || status === 'DELIVERED') {
+          return [MessageDelivered(this.name, instanceId, { messageId })];
+        }
+        return [];
+      }
+      case 'connection.update': {
+        const state = data['state'] as string | undefined;
+        if (state === 'open') return [InstanceConnected(this.name, instanceId)];
+        if (state === 'close') return [ConnectionLost(this.name, instanceId, { reason: 'connection.update: close' })];
+        return [];
+      }
+      default:
+        return [];
+    }
+  }
+
+  // ==========================================================================
+
+  private toSendResult(raw: unknown): SendResult {
+    const messageId = (raw as { key?: { id?: string } } | undefined)?.key?.id;
+    return { messageId, raw };
+  }
+
+  private extractQrCode(raw: Record<string, unknown>): string | undefined {
+    const qrcode = raw['qrcode'] as { base64?: string } | undefined;
+    return qrcode?.base64 ?? (raw['base64'] as string | undefined);
+  }
+}

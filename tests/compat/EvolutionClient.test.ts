@@ -1,9 +1,9 @@
 import axios from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { EvolutionApiError } from '../src/exceptions/EvolutionApiError.js';
-import { EvolutionClient } from '../src/EvolutionClient.js';
-import { createEvolutionClient } from '../src/factory.js';
-import { ThrottledSender } from '../src/support/ThrottledSender.js';
+import { EvolutionApiError } from '../../src/compat/EvolutionApiError.js';
+import { EvolutionClient } from '../../src/compat/EvolutionClient.js';
+import { createEvolutionClient } from '../../src/compat/createEvolutionClient.js';
+import { ThrottledSender } from '../../src/support/ThrottledSender.js';
 
 // ---------------------------------------------------------------------------
 // Mock do axios
