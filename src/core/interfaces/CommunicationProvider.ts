@@ -5,6 +5,8 @@
 // formas como API pública estável, sem duplicar a definição.
 // ============================================================================
 
+import type { DomainEvent } from '../events/index.js';
+
 export type WhatsAppProviderName = 'evolution' | 'zapi' | 'meta';
 
 export interface ReplyButton {
@@ -129,4 +131,11 @@ export interface CommunicationProvider {
     providerOptions?: CarouselProviderOptions,
   ): Promise<SendResult>;
   sendReaction(instanceId: string, to: string, messageId: string, emoji: string): Promise<SendResult>;
+
+  /**
+   * Normaliza o corpo bruto de um webhook recebido DO provider em eventos de domínio. Recebe
+   * o Buffer bruto (não o JSON já parseado) porque a Meta exige validar a assinatura
+   * X-Hub-Signature-256 sobre os bytes originais antes de qualquer parsing.
+   */
+  parseWebhookPayload(rawBody: Buffer, headers: Record<string, string>): DomainEvent[];
 }

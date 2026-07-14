@@ -14,7 +14,16 @@ import type {
 import type { EventPublisher } from '../../core/interfaces/EventPublisher.js';
 import type { Logger } from '../../core/interfaces/Logger.js';
 import { PhoneNumber } from '../../core/value-objects/PhoneNumber.js';
-import { InstanceConnected, InstanceDisconnected, QRCodeGenerated } from '../../core/events/index.js';
+import {
+  ConnectionLost,
+  InstanceConnected,
+  InstanceDisconnected,
+  MessageDelivered,
+  MessageRead,
+  MessageReceived,
+  QRCodeGenerated,
+  type DomainEvent,
+} from '../../core/events/index.js';
 import { ProviderHttpClient } from '../../infrastructure/http/ProviderHttpClient.js';
 import type { ZApiProviderConfig } from '../../contracts/dto/index.js';
 
@@ -200,5 +209,42 @@ export class ZApiProvider implements CommunicationProvider {
   private toSendResult(raw: unknown): SendResult {
     const messageId = (raw as { messageId?: string } | undefined)?.messageId;
     return { messageId, raw };
+  }
+
+  // ==========================================================================
+  // Webhook inbound
+  // ==========================================================================
+
+  /**
+   * Normaliza os webhooks da Z-API. Formato varia por tipo de evento (mensagem recebida,
+   * status de entrega, conexão) — mapeamento best-effort a partir da documentação; validar
+   * contra uma instância real antes de depender em produção.
+   */
+  parseWebhookPayload(rawBody: Buffer, _headers: Record<string, string>): DomainEvent[] {
+    const body = JSON.parse(rawBody.toString('utf8')) as Record<string, unknown>;
+    const instanceId = (body['instanceId'] as string | undefined) ?? 'unknown';
+
+    if (typeof body['status'] === 'string') {
+      const status = (body['status'] as string).toUpperCase();
+      const messageId = (body['ids'] as string[] | undefined)?.[0] ?? (body['messageId'] as string | undefined) ?? '';
+      if (status === 'READ') return [MessageRead(this.name, instanceId, { messageId })];
+      if (status === 'RECEIVED' || status === 'DELIVERED') return [MessageDelivered(this.name, instanceId, { messageId })];
+      return [];
+    }
+
+    if (typeof body['phone'] === 'string' && (body['text'] || body['image'] || body['audio'] || body['document'])) {
+      return [
+        MessageReceived(this.name, instanceId, {
+          from: PhoneNumber.create(String(body['phone'])).toString(),
+          messageId: String(body['messageId'] ?? ''),
+          content: body,
+        }),
+      ];
+    }
+
+    if (body['connected'] === true) return [InstanceConnected(this.name, instanceId)];
+    if (body['connected'] === false) return [ConnectionLost(this.name, instanceId, { reason: 'webhook: connected=false' })];
+
+    return [];
   }
 }

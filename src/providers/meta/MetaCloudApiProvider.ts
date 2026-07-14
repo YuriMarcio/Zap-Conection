@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type {
   ButtonsContent,
@@ -15,7 +16,7 @@ import type {
 import type { EventPublisher } from '../../core/interfaces/EventPublisher.js';
 import type { Logger } from '../../core/interfaces/Logger.js';
 import { UnsupportedProviderOperationException } from '../../core/exceptions/UnsupportedProviderOperationException.js';
-import { InstanceConnected } from '../../core/events/index.js';
+import { InstanceConnected, MessageDelivered, MessageRead, MessageReceived, type DomainEvent } from '../../core/events/index.js';
 import { ProviderHttpClient } from '../../infrastructure/http/ProviderHttpClient.js';
 import type { MetaProviderConfig } from '../../contracts/dto/index.js';
 import {
@@ -36,6 +37,7 @@ export class MetaCloudApiProvider implements CommunicationProvider {
   private readonly http: ProviderHttpClient;
   private readonly phoneNumberId: string;
   private readonly wabaId: string | undefined;
+  private readonly appSecret: string | undefined;
 
   constructor(
     config: MetaProviderConfig,
@@ -44,6 +46,7 @@ export class MetaCloudApiProvider implements CommunicationProvider {
   ) {
     this.phoneNumberId = config.phoneNumberId;
     this.wabaId = config.wabaId;
+    this.appSecret = config.appSecret;
 
     const axiosInstance = axios.create({
       baseURL: `https://graph.facebook.com/${config.apiVersion ?? 'v23.0'}`,
@@ -280,6 +283,86 @@ export class MetaCloudApiProvider implements CommunicationProvider {
       messaging_product: 'whatsapp',
       sync_type: 'history',
     });
+  }
+
+  // ==========================================================================
+  // Webhook inbound
+  // ==========================================================================
+
+  /**
+   * Normaliza o payload de webhook da Cloud API (`entry[].changes[]`). Valida a assinatura
+   * X-Hub-Signature-256 primeiro (se `appSecret` estiver configurado) — requisito real de
+   * segurança da Meta, não best-effort. Reconhece tanto mensagens/status normais quanto os
+   * 3 eventos exclusivos de Coexistence (history, smb_app_state_sync, smb_message_echoes).
+   */
+  parseWebhookPayload(rawBody: Buffer, headers: Record<string, string>): DomainEvent[] {
+    this.verifySignature(rawBody, headers);
+
+    const body = JSON.parse(rawBody.toString('utf8')) as {
+      entry?: Array<{ changes?: Array<{ field?: string; value?: Record<string, unknown> }> }>;
+    };
+    const instanceId = this.phoneNumberId;
+    const events: DomainEvent[] = [];
+
+    for (const entry of body.entry ?? []) {
+      for (const change of entry.changes ?? []) {
+        const value = change.value ?? {};
+
+        switch (change.field) {
+          case 'messages': {
+            for (const message of (value['messages'] as Array<Record<string, unknown>> | undefined) ?? []) {
+              events.push(
+                MessageReceived(this.name, instanceId, {
+                  from: String(message['from']),
+                  messageId: String(message['id']),
+                  content: message,
+                }),
+              );
+            }
+            for (const status of (value['statuses'] as Array<Record<string, unknown>> | undefined) ?? []) {
+              const messageId = String(status['id']);
+              if (status['status'] === 'read') events.push(MessageRead(this.name, instanceId, { messageId }));
+              else if (status['status'] === 'delivered') events.push(MessageDelivered(this.name, instanceId, { messageId }));
+            }
+            break;
+          }
+          case 'history':
+            events.push({ type: 'CoexistenceHistorySync', occurredAt: new Date(), provider: this.name, instanceId, payload: value });
+            break;
+          case 'smb_app_state_sync':
+            events.push({ type: 'CoexistenceContactSync', occurredAt: new Date(), provider: this.name, instanceId, payload: value });
+            break;
+          case 'smb_message_echoes':
+            events.push({ type: 'CoexistenceMessageEcho', occurredAt: new Date(), provider: this.name, instanceId, payload: value });
+            break;
+          default:
+            break;
+        }
+      }
+    }
+
+    return events;
+  }
+
+  /**
+   * Sem `appSecret` configurado, não valida (comportamento documentado — não bloqueia quem
+   * ainda não configurou, mas também não finge segurança que não existe).
+   */
+  private verifySignature(rawBody: Buffer, headers: Record<string, string>): void {
+    if (!this.appSecret) return;
+
+    const signatureHeader = headers['x-hub-signature-256'];
+    if (!signatureHeader) {
+      throw new Error('Webhook da Meta sem header X-Hub-Signature-256.');
+    }
+
+    const expected = `sha256=${createHmac('sha256', this.appSecret).update(rawBody).digest('hex')}`;
+    const received = Buffer.from(signatureHeader);
+    const expectedBuffer = Buffer.from(expected);
+
+    if (received.length !== expectedBuffer.length || !timingSafeEqual(received, expectedBuffer)) {
+      throw new Error('Assinatura X-Hub-Signature-256 inválida.');
+    }
   }
 
   // ==========================================================================

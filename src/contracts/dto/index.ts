@@ -49,6 +49,8 @@ export interface MetaProviderConfig {
   accessToken: string;
   wabaId?: string;
   apiVersion?: string;
+  /** Usado para validar a assinatura X-Hub-Signature-256 dos webhooks recebidos. */
+  appSecret?: string;
   throwOnError?: boolean;
   timeout?: number;
 }

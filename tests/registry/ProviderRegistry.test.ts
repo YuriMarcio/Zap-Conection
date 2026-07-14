@@ -20,6 +20,7 @@ function fakeProvider(name: CommunicationProvider['name']): CommunicationProvide
     sendList: async () => ({ raw: null }),
     sendCarousel: async () => ({ raw: null }),
     sendReaction: async () => ({ raw: null }),
+    parseWebhookPayload: () => [],
   };
 }
 

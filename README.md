@@ -12,11 +12,12 @@ Uma interface única para Evolution API, Z-API e a API oficial da Meta.
 <br>
 
 > [!NOTE]
-> Este pacote é o SDK oficial. Trocar de provider é **mudar configuração** — nenhum código
-> consumidor precisa mudar. Sem regra de negócio, sem UI, sem servidor HTTP próprio: só
+> Este pacote é o SDK oficial **e** a API HTTP do FlowBridge. Trocar de provider é **mudar
+> configuração** — nenhum código consumidor precisa mudar. Sem regra de negócio, sem UI: só
 > infraestrutura de comunicação (conexão, instância, webhook, mensagens, botões, listas,
-> carrossel). Arquitetura completa em [`ARCHITECTURE.md`](./ARCHITECTURE.md) e
-> [`VISION.md`](./VISION.md).
+> carrossel). Projetos TS/JS podem embutir o SDK diretamente no processo; **qualquer outra
+> linguagem (PHP incluso)** fala com o [`api/`](#-api-http-api) por HTTP simples. Arquitetura
+> completa em [`ARCHITECTURE.md`](./ARCHITECTURE.md) e [`VISION.md`](./VISION.md).
 
 <br>
 
@@ -28,6 +29,7 @@ Uma interface única para Evolution API, Z-API e a API oficial da Meta.
 - [Início rápido](#-início-rápido)
 - [Providers suportados](#-providers-suportados)
 - [Matriz de capacidades](#-matriz-de-capacidades)
+- [API HTTP (`api/`)](#-api-http-api)
 - [Coexistence (Meta Cloud API)](#-coexistence-meta-cloud-api)
 - [Logger & Eventos de domínio](#-logger--eventos-de-domínio)
 - [ThrottledSender](#-throttledsender--disparos-seguros-em-prospecção)
@@ -77,15 +79,25 @@ nenhuma outra camada tem `if (provider === 'evolution')`.
 
 ```mermaid
 flowchart TB
-    application["🧩 application/<br/>use-cases + FlowBridgeClient (o SDK)"]
+    sdk["🧩 SDK embutido (TS/JS)<br/>createFlowBridgeClient()"]
+    api["🌐 api/<br/>Fastify — REST, qualquer linguagem"]
+    application["🧩 application/<br/>use-cases + InstanceProviderRegistry"]
     contracts["📦 contracts/<br/>dto · requests · responses · schemas (zod)"]
     core["🧠 core/<br/>CommunicationProvider · entities · events · exceptions"]
     registry["🗂️ registry/<br/>ProviderRegistry"]
     providers["🔌 providers/<br/>evolution · zapi · meta"]
 
+    sdk --> application
+    api --> application
     application --> contracts --> core
     application --> registry --> providers --> core
 ```
+
+Dois pontos de entrada, mesmo Core por baixo: o **SDK embutido** roda dentro do processo da
+aplicação TS/JS (sem servidor, sem rede — é o que o SINAL já usa hoje); a **API HTTP**
+(`api/`) é o mesmo Core exposto como serviço, para qualquer linguagem que não seja TS/Node
+(ex.: PHP) ou para quem prefere gestão centralizada de instâncias. Nenhuma camada de negócio
+sabe qual dos dois está sendo usado — ambos terminam no mesmo `ProviderRegistry`.
 
 > [!TIP]
 > Uma operação que um provider genuinamente não suporta (ex.: `checkNumbers` na Meta Cloud
@@ -234,6 +246,79 @@ await flowBridge.sendCarousel({
 
 <br>
 
+## 🌐 API HTTP (`api/`)
+
+> [!IMPORTANT]
+> Existe porque **PHP (e qualquer linguagem que não seja TS/Node) não consegue importar o
+> SDK** — as alternativas seriam portar a lógica pra PHP (duplica manutenção) ou chamar Node
+> via shell/FFI (frágil). A API HTTP resolve isso: mesmo Core, exposto como serviço, com uma
+> chave de API simples.
+
+**1. Configure e suba o servidor:**
+
+```env
+# .env
+FLOWBRIDGE_API_KEY=uma-chave-forte-aqui       # sem isso, a API fica sem autenticação (só dev local)
+FLOWBRIDGE_PUBLIC_URL=https://flowbridge.seudominio.com   # usada para registrar o webhook de volta nos providers
+PORT=3000
+
+# + as env vars de provider já vistas em "Início rápido" (a Evolution é lida do ambiente
+# automaticamente; Z-API e Meta são configurados por instância via POST /v1/instances)
+```
+
+```bash
+npm run dev     # desenvolvimento (tsx watch)
+npm run build && npm start   # produção
+```
+
+**2. Crie uma instância** — a API resolve/constrói o provider certo, chama `connect()` e já
+registra o próprio `api/` como webhook do provider automaticamente:
+
+```bash
+curl -X POST https://flowbridge.seudominio.com/v1/instances \
+  -H "x-api-key: uma-chave-forte-aqui" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "zapi",
+    "credentials": { "instanceId": "SEU_INSTANCE_ID", "token": "SEU_TOKEN" },
+    "callbackUrl": "https://seuapp.com/webhooks/whatsapp"
+  }'
+# → 201 { "instance": { "id": "...", "provider": "zapi", "state": "connecting", ... }, "connect": { ... } }
+```
+
+`callbackUrl` é para onde a API **repassa** os eventos normalizados (`MessageReceived`,
+`MessageDelivered`, `MessageRead`, `InstanceConnected`, ...) via `POST` — não precisa
+implementar nada específico de Evolution/Z-API/Meta do outro lado, só receber JSON.
+
+**3. Envie mensagens e gerencie a instância:**
+
+| Método | Rota | Descrição |
+|---|---|---|
+| `POST` | `/v1/instances` | Cria instância (resolve provider, conecta, configura webhook) |
+| `GET` | `/v1/instances` | Lista instâncias |
+| `GET` | `/v1/instances/:id` | Status da instância |
+| `DELETE` | `/v1/instances/:id` | Desconecta (❌ 501 na Meta — sem suporte) |
+| `POST` | `/v1/instances/:id/check-numbers` | Valida números em lote (❌ 501 na Meta) |
+| `POST` | `/v1/instances/:id/messages/:type` | Envia mensagem — `:type` = `text\|image\|audio\|video\|document\|location\|buttons\|list\|carousel\|reaction` |
+| `POST` | `/v1/webhooks/:provider/:instanceId` | Recebida **do** provider — pública, sem `x-api-key` |
+
+```bash
+curl -X POST https://flowbridge.seudominio.com/v1/instances/SEU_ID/messages/text \
+  -H "x-api-key: uma-chave-forte-aqui" \
+  -H "Content-Type: application/json" \
+  -d '{ "to": "5598999990000", "text": "Olá do PHP!" }'
+```
+
+Todas as rotas (exceto `/v1/webhooks/*`) exigem o header `x-api-key` quando
+`FLOWBRIDGE_API_KEY` está configurada — requisição sem a chave certa recebe `401`.
+
+> [!WARNING]
+> Nesta primeira versão, `InstanceRepository` é **em memória** (reinicia zerado a cada
+> deploy) e o repasse de eventos é HTTP direto para `callbackUrl` (sem fila/retry). Documentado
+> como MVP — vira banco + fila real depois, sem exigir mudanças em Core/Providers.
+
+<br>
+
 ## 🔄 Coexistence (Meta Cloud API)
 
 > [!IMPORTANT]
@@ -255,8 +340,9 @@ await meta.syncHistory();
 
 As três chaves de webhook exclusivas de Coexistence — `history`, `smb_app_state_sync`,
 `smb_message_echoes` — precisam ser inscritas **manualmente no App Dashboard da Meta**; não há
-chamada de API para isso. Os payloads já estão tipados em `contracts/dto` para quem for
-implementar o endpoint receptor:
+chamada de API para isso. Uma vez inscritas, a [API HTTP](#-api-http-api) já reconhece e
+normaliza os três (`MetaCloudApiProvider.parseWebhookPayload`), publicando como eventos de
+domínio igual aos demais. Os payloads brutos ficam tipados em `contracts/dto`:
 
 | Tipo | Descrição |
 |---|---|
@@ -291,9 +377,10 @@ const flowBridge = createFlowBridgeClient({
 | `QRCodeGenerated` | Um novo QR code é retornado por `connect()` |
 | `MessageSent` | Qualquer `send*` é concluído |
 
-`MessageReceived` / `MessageDelivered` / `MessageRead` já têm o formato definido em
-`core/events`, mas **não são emitidos pelo SDK ainda** — ele não roda servidor, então não
-recebe webhooks inbound. Ficam prontos para quando essa camada existir.
+`MessageReceived` / `MessageDelivered` / `MessageRead` têm o formato definido em
+`core/events` e são emitidos pela [API HTTP](#-api-http-api) — o SDK embutido sozinho não roda
+servidor, então não recebe webhooks inbound diretamente; quem processa webhook é sempre o
+`api/`, que repassa o evento já normalizado para o `callbackUrl` da instância.
 
 <br>
 
@@ -337,19 +424,23 @@ src/
   core/            → CommunicationProvider, entidades, value objects, eventos, exceptions
                      (não conhece HTTP, providers nem frameworks)
   contracts/       → dto · requests · responses · events · schemas (zod)
-                     linguagem pública estável do SDK
+                     linguagem pública estável do SDK e da API
   providers/       → EvolutionProvider · ZApiProvider · MetaCloudApiProvider
-                     cada um implementa CommunicationProvider, isolados entre si
-  registry/        → ProviderRegistry — único lugar que resolve provider por nome
-  application/     → use-cases (um por operação) + FlowBridgeClient (a fachada = o SDK) + factory
-  infrastructure/  → ConsoleLogger + wrapper HTTP compartilhado pelos providers
-  config/          → leitura de variáveis de ambiente por provider
+                     cada um implementa CommunicationProvider (+ parseWebhookPayload), isolados entre si
+  registry/        → ProviderRegistry — único lugar que resolve provider por *tipo*
+  application/     → use-cases (SDK embutido) + InstanceProviderRegistry (multi-tenant da API) + factory
+  infrastructure/  → ConsoleLogger · wrapper HTTP compartilhado · InMemoryInstanceRepository ·
+                     HttpForwardingEventPublisher
+  api/             → Fastify — routes/controllers/middlewares + buildServer() (testável via
+                     app.inject()) + server.ts (entrypoint real, usado por `npm run dev`/`start`)
+  config/          → leitura de variáveis de ambiente por provider + da API
   compat/          → EvolutionClient / createEvolutionClient legados (ver seção abaixo)
 ```
 
-`api/` (HTTP), infraestrutura persistente (banco, filas) e o Dashboard Administrativo estão
-**fora de escopo por enquanto** — entram como camada por cima do que já existe, sem tocar em
-Core/Providers.
+Banco de dados de verdade, Redis, filas (RabbitMQ/Kafka) e o Dashboard Administrativo
+continuam **fora de escopo** — `InMemoryInstanceRepository` e `HttpForwardingEventPublisher`
+são o primeiro degrau, documentados como MVP, e podem virar implementações com banco/fila
+depois sem tocar em Core/Providers/`api/` (só a peça de `infrastructure/` muda).
 
 </details>
 

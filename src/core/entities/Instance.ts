@@ -11,4 +11,7 @@ export interface Instance {
   readonly provider: WhatsAppProviderName;
   readonly phoneNumber?: string;
   readonly state: InstanceConnectionState;
+  /** URL para onde a API HTTP repassa os eventos normalizados desta instância. */
+  readonly callbackUrl?: string;
+  readonly createdAt: string;
 }

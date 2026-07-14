@@ -134,4 +134,42 @@ describe('ZApiProvider', () => {
 
     expect(http['put']).toHaveBeenCalledWith('/update-webhook-received-delivery', { value: 'https://app.test/webhook' });
   });
+
+  describe('parseWebhookPayload', () => {
+    function payload(body: unknown): Buffer {
+      return Buffer.from(JSON.stringify(body));
+    }
+
+    it('mensagem de texto recebida vira MessageReceived', () => {
+      const events = provider.parseWebhookPayload(
+        payload({ instanceId: 'inst-01', phone: '5598999990000', messageId: 'MSG1', text: { message: 'oi' } }),
+        {},
+      );
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'MessageReceived',
+        instanceId: 'inst-01',
+        payload: { from: '5598999990000', messageId: 'MSG1' },
+      });
+    });
+
+    it('status READ vira MessageRead', () => {
+      const events = provider.parseWebhookPayload(
+        payload({ instanceId: 'inst-01', status: 'READ', ids: ['MSG1'] }),
+        {},
+      );
+      expect(events[0]).toMatchObject({ type: 'MessageRead', payload: { messageId: 'MSG1' } });
+    });
+
+    it('connected=false vira ConnectionLost', () => {
+      const events = provider.parseWebhookPayload(payload({ instanceId: 'inst-01', connected: false }), {});
+      expect(events[0]).toMatchObject({ type: 'ConnectionLost', instanceId: 'inst-01' });
+    });
+
+    it('payload não reconhecido não gera nenhum DomainEvent', () => {
+      const events = provider.parseWebhookPayload(payload({ instanceId: 'inst-01' }), {});
+      expect(events).toEqual([]);
+    });
+  });
 });

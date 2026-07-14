@@ -140,4 +140,49 @@ describe('EvolutionProvider', () => {
       },
     });
   });
+
+  describe('parseWebhookPayload', () => {
+    function payload(body: unknown): Buffer {
+      return Buffer.from(JSON.stringify(body));
+    }
+
+    it('messages.upsert de mensagem recebida vira MessageReceived', () => {
+      const events = provider.parseWebhookPayload(
+        payload({
+          event: 'messages.upsert',
+          instance: 'inst-01',
+          data: { key: { id: 'MSG1', remoteJid: '5598999990000@s.whatsapp.net', fromMe: false }, message: { conversation: 'oi' } },
+        }),
+        {},
+      );
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'MessageReceived',
+        instanceId: 'inst-01',
+        payload: { from: '5598999990000', messageId: 'MSG1' },
+      });
+    });
+
+    it('messages.upsert de mensagem própria (fromMe) não gera evento', () => {
+      const events = provider.parseWebhookPayload(
+        payload({ event: 'messages.upsert', instance: 'inst-01', data: { key: { fromMe: true } } }),
+        {},
+      );
+      expect(events).toEqual([]);
+    });
+
+    it('connection.update state=open vira InstanceConnected', () => {
+      const events = provider.parseWebhookPayload(
+        payload({ event: 'connection.update', instance: 'inst-01', data: { state: 'open' } }),
+        {},
+      );
+      expect(events[0]).toMatchObject({ type: 'InstanceConnected', instanceId: 'inst-01' });
+    });
+
+    it('evento desconhecido não gera nenhum DomainEvent', () => {
+      const events = provider.parseWebhookPayload(payload({ event: 'algo.novo' }), {});
+      expect(events).toEqual([]);
+    });
+  });
 });

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { createHmac } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MetaCloudApiProvider } from '../../../src/providers/meta/MetaCloudApiProvider.js';
 import { ConsoleLogger } from '../../../src/infrastructure/logging/ConsoleLogger.js';
@@ -15,12 +16,12 @@ vi.mock('axios', async () => {
   };
 });
 
-function makeProvider(wabaId?: string) {
+function makeProvider(wabaId?: string, appSecret?: string) {
   const logger = new ConsoleLogger();
   vi.spyOn(logger, 'error').mockImplementation(() => {});
   vi.spyOn(logger, 'warn').mockImplementation(() => {});
   return new MetaCloudApiProvider(
-    { name: 'meta', phoneNumberId: 'PHONE_ID', accessToken: 'token', wabaId },
+    { name: 'meta', phoneNumberId: 'PHONE_ID', accessToken: 'token', wabaId, appSecret },
     logger,
   );
 }
@@ -175,6 +176,109 @@ describe('MetaCloudApiProvider', () => {
     expect(http['post']).toHaveBeenCalledWith('/PHONE_ID/smb_app_data', {
       messaging_product: 'whatsapp',
       sync_type: 'history',
+    });
+  });
+
+  describe('parseWebhookPayload', () => {
+    function payload(body: unknown): Buffer {
+      return Buffer.from(JSON.stringify(body));
+    }
+
+    it('mensagem recebida vira MessageReceived', () => {
+      const events = provider.parseWebhookPayload(
+        payload({
+          entry: [
+            {
+              changes: [
+                { field: 'messages', value: { messages: [{ from: '5598999990000', id: 'wamid.1', type: 'text' }] } },
+              ],
+            },
+          ],
+        }),
+        {},
+      );
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'MessageReceived',
+        instanceId: 'PHONE_ID',
+        payload: { from: '5598999990000', messageId: 'wamid.1' },
+      });
+    });
+
+    it('status read/delivered viram MessageRead/MessageDelivered', () => {
+      const events = provider.parseWebhookPayload(
+        payload({
+          entry: [
+            {
+              changes: [
+                {
+                  field: 'messages',
+                  value: {
+                    statuses: [
+                      { id: 'wamid.1', status: 'read' },
+                      { id: 'wamid.2', status: 'delivered' },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        }),
+        {},
+      );
+
+      expect(events).toEqual([
+        expect.objectContaining({ type: 'MessageRead', payload: { messageId: 'wamid.1' } }),
+        expect.objectContaining({ type: 'MessageDelivered', payload: { messageId: 'wamid.2' } }),
+      ]);
+    });
+
+    it('reconhece os 3 eventos de Coexistence', () => {
+      const events = provider.parseWebhookPayload(
+        payload({
+          entry: [
+            {
+              changes: [
+                { field: 'history', value: { phase: 0 } },
+                { field: 'smb_app_state_sync', value: { action: 'add' } },
+                { field: 'smb_message_echoes', value: { from: 'x' } },
+              ],
+            },
+          ],
+        }),
+        {},
+      );
+
+      expect(events.map((e) => e.type)).toEqual([
+        'CoexistenceHistorySync',
+        'CoexistenceContactSync',
+        'CoexistenceMessageEcho',
+      ]);
+    });
+
+    it('sem appSecret configurado, não valida assinatura', () => {
+      expect(() => provider.parseWebhookPayload(payload({ entry: [] }), {})).not.toThrow();
+    });
+
+    it('com appSecret configurado, rejeita assinatura ausente', () => {
+      const secured = makeProvider('WABA_ID', 'shh');
+      expect(() => secured.parseWebhookPayload(payload({ entry: [] }), {})).toThrow(/X-Hub-Signature-256/);
+    });
+
+    it('com appSecret configurado, rejeita assinatura inválida', () => {
+      const secured = makeProvider('WABA_ID', 'shh');
+      expect(() =>
+        secured.parseWebhookPayload(payload({ entry: [] }), { 'x-hub-signature-256': 'sha256=invalida' }),
+      ).toThrow(/inválida/);
+    });
+
+    it('com appSecret configurado, aceita assinatura válida', () => {
+      const secured = makeProvider('WABA_ID', 'shh');
+      const body = payload({ entry: [] });
+      const signature = `sha256=${createHmac('sha256', 'shh').update(body).digest('hex')}`;
+
+      expect(() => secured.parseWebhookPayload(body, { 'x-hub-signature-256': signature })).not.toThrow();
     });
   });
 });

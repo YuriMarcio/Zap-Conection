@@ -44,6 +44,25 @@ export { ProviderApiException } from './core/exceptions/ProviderApiException.js'
 export { UnsupportedProviderOperationException } from './core/exceptions/UnsupportedProviderOperationException.js';
 export { ProviderConnectionException } from './core/exceptions/ProviderConnectionException.js';
 
+// ============================================================================
+// API HTTP (api/) — infraestrutura para rodar o FlowBridge como microsserviço,
+// necessária para consumidores que não são TS/Node (ex.: PHP). `buildServer` monta o
+// Fastify app sem chamar `listen`, útil para testes com `app.inject()`; o processo real
+// (`npm run dev`/`start`) usa `src/api/server.ts`, que não é exportado por não fazer sentido
+// importar (ele chama `listen` e `process.exit` como side effect ao ser carregado).
+// ============================================================================
+
+export { buildServer } from './api/buildServer.js';
+export type { BuildServerOptions, BuiltServer } from './api/buildServer.js';
+
+export { InstanceProviderRegistry } from './application/InstanceProviderRegistry.js';
+export type { InstanceCredentials } from './application/InstanceProviderRegistry.js';
+
+export type { InstanceRepository } from './core/interfaces/InstanceRepository.js';
+export { InMemoryInstanceRepository } from './infrastructure/persistence/InMemoryInstanceRepository.js';
+export { HttpForwardingEventPublisher } from './infrastructure/events/HttpForwardingEventPublisher.js';
+export type { Instance, InstanceConnectionState } from './core/entities/Instance.js';
+
 export type {
   ButtonsContent,
   CarouselContent,
@@ -72,6 +91,7 @@ export type {
   BaseProviderRequest,
   CheckNumbersRequest,
   ConnectInstanceRequest,
+  CreateInstanceApiRequest,
   DisconnectInstanceRequest,
   GetInstanceStatusRequest,
   SendAudioRequest,
@@ -87,6 +107,6 @@ export type {
   SetWebhookRequest,
 } from './contracts/requests/index.js';
 
-export type { CheckNumbersResponse } from './contracts/responses/index.js';
+export type { CheckNumbersResponse, CreateInstanceApiResponse } from './contracts/responses/index.js';
 
 export * from './core/events/index.js';

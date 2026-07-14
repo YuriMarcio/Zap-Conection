@@ -88,3 +88,34 @@ export interface SendReactionRequest extends BaseProviderRequest {
   messageId: string;
   emoji: string;
 }
+
+// ============================================================================
+// Requests da API HTTP (api/) — só existem nesse nível porque a API gerencia instâncias
+// dinamicamente (POST /v1/instances), diferente do SDK embutido, que já conhece o
+// provider/instanceId de antemão em cada chamada.
+// ============================================================================
+
+/** Credenciais aceitas em POST /v1/instances. Campos de Z-API e Meta convivem no mesmo tipo
+ *  porque o provider é escolhido em runtime; cada instância só usa os campos do seu tipo. */
+export interface InstanceCredentials {
+  // Z-API
+  instanceId?: string;
+  token?: string;
+  clientToken?: string;
+  // Meta Cloud API
+  phoneNumberId?: string;
+  accessToken?: string;
+  wabaId?: string;
+  apiVersion?: string;
+  appSecret?: string;
+}
+
+export interface CreateInstanceApiRequest {
+  provider: WhatsAppProviderName;
+  /** Id lógico da instância; gerado automaticamente se omitido. */
+  instanceId?: string;
+  /** Não se aplica à Evolution (credenciais globais via env). Obrigatório para zapi/meta. */
+  credentials?: InstanceCredentials;
+  /** URL para onde a API repassa os eventos normalizados desta instância. */
+  callbackUrl?: string;
+}

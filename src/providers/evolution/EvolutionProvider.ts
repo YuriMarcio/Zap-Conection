@@ -14,7 +14,16 @@ import type {
 import type { EventPublisher } from '../../core/interfaces/EventPublisher.js';
 import type { Logger } from '../../core/interfaces/Logger.js';
 import { PhoneNumber } from '../../core/value-objects/PhoneNumber.js';
-import { InstanceConnected, InstanceDisconnected, QRCodeGenerated } from '../../core/events/index.js';
+import {
+  ConnectionLost,
+  InstanceConnected,
+  InstanceDisconnected,
+  MessageDelivered,
+  MessageRead,
+  MessageReceived,
+  QRCodeGenerated,
+  type DomainEvent,
+} from '../../core/events/index.js';
 import { ProviderHttpClient } from '../../infrastructure/http/ProviderHttpClient.js';
 import type { EvolutionProviderConfig } from '../../contracts/dto/index.js';
 
@@ -224,6 +233,57 @@ export class EvolutionProvider implements CommunicationProvider {
       },
     });
     return this.toSendResult(raw);
+  }
+
+  // ==========================================================================
+  // Webhook inbound
+  // ==========================================================================
+
+  /**
+   * Normaliza o payload de webhook da Evolution (`{ event, instance, data }`). Mapeamento
+   * best-effort a partir dos eventos documentados (messages.upsert, messages.update,
+   * connection.update) — validar contra uma instância real antes de depender em produção.
+   */
+  parseWebhookPayload(rawBody: Buffer, _headers: Record<string, string>): DomainEvent[] {
+    const body = JSON.parse(rawBody.toString('utf8')) as {
+      event?: string;
+      instance?: string;
+      data?: Record<string, unknown>;
+    };
+    const instanceId = body.instance ?? 'unknown';
+    const data = body.data ?? {};
+
+    switch (body.event) {
+      case 'messages.upsert': {
+        const key = data['key'] as { id?: string; remoteJid?: string; fromMe?: boolean } | undefined;
+        if (key?.fromMe) return [];
+        return [
+          MessageReceived(this.name, instanceId, {
+            from: key?.remoteJid ? PhoneNumber.create(key.remoteJid).toString() : 'unknown',
+            messageId: key?.id ?? '',
+            content: data['message'],
+          }),
+        ];
+      }
+      case 'messages.update': {
+        const key = data['key'] as { id?: string } | undefined;
+        const messageId = key?.id ?? '';
+        const status = String(data['status'] ?? '').toUpperCase();
+        if (status === 'READ') return [MessageRead(this.name, instanceId, { messageId })];
+        if (status === 'DELIVERY_ACK' || status === 'DELIVERED') {
+          return [MessageDelivered(this.name, instanceId, { messageId })];
+        }
+        return [];
+      }
+      case 'connection.update': {
+        const state = data['state'] as string | undefined;
+        if (state === 'open') return [InstanceConnected(this.name, instanceId)];
+        if (state === 'close') return [ConnectionLost(this.name, instanceId, { reason: 'connection.update: close' })];
+        return [];
+      }
+      default:
+        return [];
+    }
   }
 
   // ==========================================================================

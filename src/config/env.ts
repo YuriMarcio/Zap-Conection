@@ -47,7 +47,27 @@ export function readMetaEnv(): MetaProviderConfig | undefined {
     accessToken,
     wabaId: process.env['WHATSAPP_CLOUD_WABA_ID'],
     apiVersion: process.env['WHATSAPP_CLOUD_API_VERSION'] ?? 'v23.0',
+    appSecret: process.env['WHATSAPP_CLOUD_APP_SECRET'],
     throwOnError: process.env['WHATSAPP_THROW_ON_ERROR'] === 'true',
     timeout: Number(process.env['WHATSAPP_TIMEOUT_MS'] ?? 15_000),
+  };
+}
+
+export interface ApiEnvConfig {
+  apiKey: string | undefined;
+  publicUrl: string;
+  port: number;
+}
+
+/**
+ * Env vars específicas da camada api/ (servidor HTTP). `apiKey` undefined desabilita a
+ * checagem de `x-api-key` (útil em desenvolvimento local) — documentado no README como algo
+ * a nunca fazer em produção.
+ */
+export function readApiEnv(): ApiEnvConfig {
+  return {
+    apiKey: process.env['FLOWBRIDGE_API_KEY'],
+    publicUrl: (process.env['FLOWBRIDGE_PUBLIC_URL'] ?? 'http://localhost:3000').replace(/\/$/, ''),
+    port: Number(process.env['PORT'] ?? 3000),
   };
 }
