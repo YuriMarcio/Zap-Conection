@@ -9,6 +9,11 @@ services:
       - .env
     environment:
       MYSQL_HOST: mysql
+      # PORT no .env controla só a porta publicada no HOST (${PORT:-3001} abaixo) — o app
+      # sempre escuta na 3000 *dentro* do container. Sem isso, o PORT do .env vaza pro
+      # processo (env_file) e ele passa a escutar numa porta diferente da que o mapeamento
+      # "${PORT}:3000" espera, quebrando o acesso externo.
+      PORT: "3000"
     depends_on:
       mysql:
         condition: service_healthy
