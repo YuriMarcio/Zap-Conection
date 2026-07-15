@@ -1,12 +1,12 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { InstanceProviderRegistry } from '../application/InstanceProviderRegistry.js';
-import { readApiEnv, readEvolutionEnv } from '../config/env.js';
+import { readApiEnv, readEvolutionEnv, readMySqlEnv } from '../config/env.js';
 import type { EventPublisher } from '../core/interfaces/EventPublisher.js';
 import type { InstanceRepository } from '../core/interfaces/InstanceRepository.js';
 import type { Logger } from '../core/interfaces/Logger.js';
 import { HttpForwardingEventPublisher } from '../infrastructure/events/HttpForwardingEventPublisher.js';
 import { ConsoleLogger } from '../infrastructure/logging/ConsoleLogger.js';
-import { InMemoryInstanceRepository } from '../infrastructure/persistence/InMemoryInstanceRepository.js';
+import { MySqlInstanceRepository } from '../infrastructure/persistence/MySqlInstanceRepository.js';
 import { EvolutionProvider } from '../providers/evolution/EvolutionProvider.js';
 import { ProviderRegistry } from '../registry/ProviderRegistry.js';
 import { InstanceController } from './controllers/InstanceController.js';
@@ -42,7 +42,10 @@ export function buildServer(options: BuildServerOptions = {}): BuiltServer {
   const publicUrl = (options.publicUrl ?? apiEnv.publicUrl).replace(/\/$/, '');
   const apiKey = options.apiKey ?? apiEnv.apiKey;
 
-  const instanceRepository = options.instanceRepository ?? new InMemoryInstanceRepository();
+  // Sem opção explícita (caso real de produção, api/server.ts), persiste em MySQL — instâncias
+  // (e as credenciais necessárias pra reconstruir o provider) sobrevivem a um restart do
+  // processo/container. Testes sempre passam InMemoryInstanceRepository explicitamente.
+  const instanceRepository = options.instanceRepository ?? new MySqlInstanceRepository(readMySqlEnv(), logger);
   const eventPublisher = options.eventPublisher ?? new HttpForwardingEventPublisher(instanceRepository, logger);
 
   // Evolution é multi-tenant nativamente — um único provider compartilhado, configurado via
@@ -53,7 +56,7 @@ export function buildServer(options: BuildServerOptions = {}): BuiltServer {
     providerRegistry.register(new EvolutionProvider(evolutionConfig, logger, eventPublisher));
   }
 
-  const instanceProviderRegistry = new InstanceProviderRegistry(providerRegistry, logger, eventPublisher);
+  const instanceProviderRegistry = new InstanceProviderRegistry(providerRegistry, instanceRepository, logger, eventPublisher);
 
   const app = Fastify({ logger: false });
 
@@ -74,6 +77,9 @@ export function buildServer(options: BuildServerOptions = {}): BuiltServer {
   });
 
   app.setErrorHandler(createErrorHandler(logger));
+
+  // Sem autenticação de propósito — usado por healthcheck do Docker/orquestrador/load balancer.
+  app.get('/health', async () => ({ status: 'ok' }));
 
   const instanceController = new InstanceController(instanceRepository, instanceProviderRegistry, logger, publicUrl);
   const messageController = new MessageController(instanceRepository, instanceProviderRegistry);

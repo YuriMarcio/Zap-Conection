@@ -1,4 +1,5 @@
 import type { EvolutionProviderConfig, MetaProviderConfig, ZApiProviderConfig } from '../contracts/dto/index.js';
+import type { MySqlConfig } from '../infrastructure/persistence/MySqlInstanceRepository.js';
 
 /**
  * Centraliza a leitura de variáveis de ambiente por provider (antes espalhada dentro de
@@ -70,4 +71,26 @@ export function readApiEnv(): ApiEnvConfig {
     publicUrl: (process.env['FLOWBRIDGE_PUBLIC_URL'] ?? 'http://localhost:3000').replace(/\/$/, ''),
     port: Number(process.env['PORT'] ?? 3000),
   };
+}
+
+/**
+ * Configuração do MySQL usado para persistir instâncias (`MySqlInstanceRepository`) — a API
+ * HTTP real (`api/server.ts`) exige essas variáveis; sem elas, falha explicitamente no boot em
+ * vez de cair silenciosamente em memória (que reintroduziria instâncias sendo perdidas a cada
+ * restart).
+ */
+export function readMySqlEnv(): MySqlConfig {
+  const host = process.env['MYSQL_HOST'];
+  const user = process.env['MYSQL_USER'];
+  const password = process.env['MYSQL_PASSWORD'];
+  const database = process.env['MYSQL_DATABASE'];
+
+  if (!host || !user || !password || !database) {
+    throw new Error(
+      '[FlowBridge API] MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD e MYSQL_DATABASE são obrigatórias ' +
+        '(persistência de instâncias). Ver .env.example.',
+    );
+  }
+
+  return { host, port: Number(process.env['MYSQL_PORT'] ?? 3306), user, password, database };
 }

@@ -28,7 +28,7 @@ export class WebhookController {
       return;
     }
 
-    const providerImpl = this.instanceProviderRegistry.resolve(instanceId, provider);
+    const providerImpl = await this.instanceProviderRegistry.resolve(instanceId, provider);
     const rawBody = (request as unknown as { rawBody?: Buffer }).rawBody ?? Buffer.from(JSON.stringify(request.body ?? {}));
     const headers = this.flattenHeaders(request.headers);
 

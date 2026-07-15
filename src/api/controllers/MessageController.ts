@@ -34,7 +34,7 @@ export class MessageController {
       return;
     }
 
-    const provider = this.instanceProviderRegistry.resolve(id, instance.provider);
+    const provider = await this.instanceProviderRegistry.resolve(id, instance.provider);
     const body = (request.body ?? {}) as Record<string, unknown>;
 
     reply.send(await this.dispatch(provider, id, type, body));
