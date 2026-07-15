@@ -22,6 +22,18 @@ interface InstanceRow extends RowDataPacket {
   created_at: Date | string;
 }
 
+export interface RetryOptions {
+  maxAttempts?: number;
+  delayMs?: number;
+}
+
+const DEFAULT_MAX_ATTEMPTS = 10;
+const DEFAULT_RETRY_DELAY_MS = 3_000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Persistência real em MySQL — sobrevive a restart/recriação do container. Guarda `credentials`
  * como JSON (segredo em texto plano — ver aviso de segurança no README, nunca expor a porta do
@@ -32,8 +44,12 @@ interface InstanceRow extends RowDataPacket {
 export class MySqlInstanceRepository implements InstanceRepository {
   private readonly pool: Pool;
   private readonly ready: Promise<void>;
+  private readonly maxAttempts: number;
+  private readonly retryDelayMs: number;
 
-  constructor(config: MySqlConfig, private readonly logger: Logger) {
+  constructor(config: MySqlConfig, private readonly logger: Logger, retry: RetryOptions = {}) {
+    this.maxAttempts = retry.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    this.retryDelayMs = retry.delayMs ?? DEFAULT_RETRY_DELAY_MS;
     this.pool = createPool({
       host: config.host,
       port: config.port,
@@ -43,21 +59,48 @@ export class MySqlInstanceRepository implements InstanceRepository {
       waitForConnections: true,
       connectionLimit: 10,
     });
-    this.ready = this.migrate();
+    this.ready = this.migrateWithRetry();
+    // Evita que uma falha de conexão no boot vire "unhandled promise rejection" e derrube o
+    // processo inteiro (Node trata isso como erro fatal por padrão) — o erro real continua
+    // sendo propagado normalmente pra quem faz `await this.ready` em save/findById/etc.
+    this.ready.catch(() => {});
   }
 
-  private async migrate(): Promise<void> {
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS instances (
-        id VARCHAR(191) PRIMARY KEY,
-        provider VARCHAR(32) NOT NULL,
-        phone_number VARCHAR(64) NULL,
-        state VARCHAR(16) NOT NULL,
-        callback_url TEXT NULL,
-        credentials JSON NULL,
-        created_at DATETIME NOT NULL
-      )
-    `);
+  /**
+   * O MySQL oficial reinicia internamente na primeira inicialização (bootstrap → restart real)
+   * — a porta 3306 pode ficar momentaneamente inacessível mesmo depois do healthcheck do
+   * Docker já ter passado (`depends_on: condition: service_healthy` não é garantia absoluta).
+   * Por isso, tenta conectar com retry em vez de falhar na primeira tentativa.
+   */
+  private async migrateWithRetry(): Promise<void> {
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      try {
+        await this.pool.query(`
+          CREATE TABLE IF NOT EXISTS instances (
+            id VARCHAR(191) PRIMARY KEY,
+            provider VARCHAR(32) NOT NULL,
+            phone_number VARCHAR(64) NULL,
+            state VARCHAR(16) NOT NULL,
+            callback_url TEXT NULL,
+            credentials JSON NULL,
+            created_at DATETIME NOT NULL
+          )
+        `);
+        if (attempt > 1) {
+          this.logger.info(`Conectado ao MySQL na tentativa ${attempt}/${this.maxAttempts}`);
+        }
+        return;
+      } catch (err) {
+        if (attempt === this.maxAttempts) {
+          this.logger.error(`Falha ao conectar no MySQL após ${this.maxAttempts} tentativas`, { error: String(err) });
+          throw err;
+        }
+        this.logger.warn(`MySQL indisponível (tentativa ${attempt}/${this.maxAttempts}), tentando de novo em ${this.retryDelayMs}ms`, {
+          error: String(err),
+        });
+        await delay(this.retryDelayMs);
+      }
+    }
   }
 
   async save(instance: Instance): Promise<void> {

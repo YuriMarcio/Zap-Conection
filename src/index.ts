@@ -61,7 +61,7 @@ export type { InstanceCredentials } from './application/InstanceProviderRegistry
 export type { InstanceRepository } from './core/interfaces/InstanceRepository.js';
 export { InMemoryInstanceRepository } from './infrastructure/persistence/InMemoryInstanceRepository.js';
 export { MySqlInstanceRepository } from './infrastructure/persistence/MySqlInstanceRepository.js';
-export type { MySqlConfig } from './infrastructure/persistence/MySqlInstanceRepository.js';
+export type { MySqlConfig, RetryOptions } from './infrastructure/persistence/MySqlInstanceRepository.js';
 export { HttpForwardingEventPublisher } from './infrastructure/events/HttpForwardingEventPublisher.js';
 export type { Instance, InstanceConnectionState } from './core/entities/Instance.js';
 
