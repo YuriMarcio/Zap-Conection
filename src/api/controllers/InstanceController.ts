@@ -72,6 +72,19 @@ export class InstanceController {
     reply.send(await provider.getStatus(id));
   };
 
+  /**
+   * Busca um QR code novo sem recriar a instância — o QR do Baileys (Evolution/Z-API) expira
+   * em segundos, então isso existe pra poder tentar de novo sem perder a instância já criada.
+   */
+  getQrCode = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const { id } = request.params as { id: string };
+    const instance = await this.requireInstance(id, reply);
+    if (!instance) return;
+
+    const provider = await this.instanceProviderRegistry.resolve(id, instance.provider);
+    reply.send(await provider.getQrCode(id));
+  };
+
   disconnect = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const { id } = request.params as { id: string };
     const instance = await this.requireInstance(id, reply);

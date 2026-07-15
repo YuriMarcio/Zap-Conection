@@ -66,6 +66,16 @@ export class ZApiProvider implements CommunicationProvider {
   // ==========================================================================
 
   async connect(instanceId: string): Promise<ConnectResult> {
+    return this.fetchQrCode(instanceId);
+  }
+
+  // Já é só um GET idempotente — não existe "criar instância" separado na Z-API, então
+  // connect() e getQrCode() fazem exatamente a mesma coisa, sem risco de recriar nada.
+  async getQrCode(instanceId: string): Promise<ConnectResult> {
+    return this.fetchQrCode(instanceId);
+  }
+
+  private async fetchQrCode(instanceId: string): Promise<ConnectResult> {
     const raw = await this.http.get<Record<string, unknown>>('/instance/qrcode');
     const qrCode = (raw['value'] as string | undefined) ?? (raw['qrcode'] as string | undefined);
 

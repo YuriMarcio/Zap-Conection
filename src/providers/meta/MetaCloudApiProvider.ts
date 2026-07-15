@@ -74,6 +74,14 @@ export class MetaCloudApiProvider implements CommunicationProvider {
     return { status: 'connected', raw };
   }
 
+  async getQrCode(): Promise<ConnectResult> {
+    throw new UnsupportedProviderOperationException(
+      this.name,
+      'getQrCode',
+      'Cloud API não usa QR code — número é provisionado direto no Meta Business Manager/Embedded Signup.',
+    );
+  }
+
   async disconnect(): Promise<void> {
     throw new UnsupportedProviderOperationException(
       this.name,

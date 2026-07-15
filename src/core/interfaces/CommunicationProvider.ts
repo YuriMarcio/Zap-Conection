@@ -103,6 +103,13 @@ export interface CommunicationProvider {
   readonly name: WhatsAppProviderName;
 
   connect(instanceId: string): Promise<ConnectResult>;
+  /**
+   * Busca um QR code novo para uma instância que já existe, sem recriá-la — necessário
+   * porque o QR do Baileys (Evolution/Z-API) expira em segundos e `connect()` sozinho não dá
+   * para chamar de novo sem risco de tentar recriar a instância. Lança
+   * UnsupportedProviderOperationException na Meta (não existe conceito de QR na Cloud API).
+   */
+  getQrCode(instanceId: string): Promise<ConnectResult>;
   disconnect(instanceId: string): Promise<void>;
   getStatus(instanceId: string): Promise<InstanceStatus>;
   setWebhook(instanceId: string, config: WebhookConfig): Promise<void>;

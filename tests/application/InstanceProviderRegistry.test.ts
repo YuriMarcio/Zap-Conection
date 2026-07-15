@@ -11,6 +11,7 @@ function fakeEvolutionProvider(): CommunicationProvider {
   return {
     name: 'evolution',
     connect: async () => ({ status: 'connected' }),
+    getQrCode: async () => ({ status: 'connected' }),
     disconnect: async () => {},
     getStatus: async () => ({ instanceId: 'x', state: 'open' }),
     setWebhook: async () => {},

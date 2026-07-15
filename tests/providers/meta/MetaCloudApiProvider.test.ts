@@ -129,6 +129,10 @@ describe('MetaCloudApiProvider', () => {
     await expect(provider.disconnect('inst-01')).rejects.toThrow(UnsupportedProviderOperationException);
   });
 
+  it('getQrCode lança UnsupportedProviderOperationException (Cloud API não usa QR)', async () => {
+    await expect(provider.getQrCode('inst-01')).rejects.toThrow(UnsupportedProviderOperationException);
+  });
+
   it('setWebhook sem wabaId lança UnsupportedProviderOperationException', async () => {
     const providerSemWaba = makeProvider();
     await expect(providerSemWaba.setWebhook('inst-01', { url: 'https://app.test', enabled: true })).rejects.toThrow(

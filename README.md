@@ -297,6 +297,7 @@ implementar nada específico de Evolution/Z-API/Meta do outro lado, só receber 
 | `POST` | `/v1/instances` | Cria instância (resolve provider, conecta, configura webhook) |
 | `GET` | `/v1/instances` | Lista instâncias |
 | `GET` | `/v1/instances/:id` | Status da instância |
+| `GET` | `/v1/instances/:id/qrcode` | Busca um QR **novo** sem recriar a instância — o QR do Baileys (Evolution/Z-API) expira em segundos; chame de novo se expirar (❌ 501 na Meta — não existe QR na Cloud API) |
 | `DELETE` | `/v1/instances/:id` | Desconecta (❌ 501 na Meta — sem suporte) |
 | `POST` | `/v1/instances/:id/check-numbers` | Valida números em lote (❌ 501 na Meta) |
 | `POST` | `/v1/instances/:id/messages/:type` | Envia mensagem — `:type` = `text\|image\|audio\|video\|document\|location\|buttons\|list\|carousel\|reaction` |

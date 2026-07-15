@@ -33,6 +33,20 @@ describe('ZApiProvider', () => {
     provider = makeProvider();
   });
 
+  it('connect e getQrCode fazem a mesma chamada GET /instance/qrcode', async () => {
+    const http = getAxios(provider);
+    http['get']!.mockResolvedValueOnce({ data: { value: 'data:image/png;base64,AAA' } });
+
+    const connectResult = await provider.connect('inst-01');
+    expect(connectResult.qrCode).toBe('data:image/png;base64,AAA');
+
+    http['get']!.mockResolvedValueOnce({ data: { value: 'data:image/png;base64,BBB' } });
+    const qrResult = await provider.getQrCode('inst-01');
+    expect(qrResult.qrCode).toBe('data:image/png;base64,BBB');
+
+    expect(http['get']).toHaveBeenCalledWith('/instance/qrcode');
+  });
+
   it('sendText envia phone/message no payload', async () => {
     const http = getAxios(provider);
     http['post']!.mockResolvedValueOnce({ data: { messageId: 'msg-1' } });

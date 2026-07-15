@@ -5,6 +5,7 @@ export function registerInstanceRoutes(app: FastifyInstance, controller: Instanc
   app.post('/v1/instances', controller.create);
   app.get('/v1/instances', controller.list);
   app.get('/v1/instances/:id', controller.getStatus);
+  app.get('/v1/instances/:id/qrcode', controller.getQrCode);
   app.delete('/v1/instances/:id', controller.disconnect);
   app.post('/v1/instances/:id/check-numbers', controller.checkNumbers);
 }

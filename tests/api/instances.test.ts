@@ -132,6 +132,36 @@ describe('api/instances', () => {
     expect(response.statusCode).toBe(501);
   });
 
+  it('GET /v1/instances/:id/qrcode busca um QR novo sem recriar a instância zapi', async () => {
+    const { app } = makeApp({ apiKey: undefined });
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/instances',
+      payload: { provider: 'zapi', credentials: { instanceId: 'zapi-1', token: 'tok' } },
+    });
+    const { instance } = create.json();
+
+    const response = await app.inject({ method: 'GET', url: `/v1/instances/${instance.id}/qrcode` });
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('GET /v1/instances/:id/qrcode em provider Meta (sem suporte) retorna 501', async () => {
+    const { app } = makeApp({ apiKey: undefined });
+
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/instances',
+      payload: { provider: 'meta', credentials: { phoneNumberId: 'PHONE_ID', accessToken: 'tok' } },
+    });
+    const { instance } = create.json();
+
+    const response = await app.inject({ method: 'GET', url: `/v1/instances/${instance.id}/qrcode` });
+
+    expect(response.statusCode).toBe(501);
+  });
+
   it('GET /v1/instances lista as instâncias criadas', async () => {
     const { app } = makeApp({ apiKey: undefined });
 

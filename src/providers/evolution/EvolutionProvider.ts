@@ -61,6 +61,19 @@ export class EvolutionProvider implements CommunicationProvider {
       integration: 'WHATSAPP-BAILEYS',
     });
 
+    return this.fetchQrCode(instanceId);
+  }
+
+  /**
+   * Sem `/instance/create` — a instância já existe. Chamar `connect()` de novo pra pegar um
+   * QR fresco arriscaria um erro de "instância já existe" no create; isso vai direto no
+   * `/instance/connect`, que a Evolution aceita chamar repetidamente na mesma instância.
+   */
+  async getQrCode(instanceId: string): Promise<ConnectResult> {
+    return this.fetchQrCode(instanceId);
+  }
+
+  private async fetchQrCode(instanceId: string): Promise<ConnectResult> {
     const raw = await this.http.get<Record<string, unknown>>(`/instance/connect/${instanceId}`);
     const qrCode = this.extractQrCode(raw);
 

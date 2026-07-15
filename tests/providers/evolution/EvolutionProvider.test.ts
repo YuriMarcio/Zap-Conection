@@ -95,6 +95,17 @@ describe('EvolutionProvider', () => {
     expect(result.qrCode).toBe('data:image/png;base64,AAA');
   });
 
+  it('getQrCode busca um QR novo sem chamar /instance/create de novo', async () => {
+    const http = getAxios(provider);
+    http['get']!.mockResolvedValueOnce({ data: { qrcode: { base64: 'data:image/png;base64,BBB' } } });
+
+    const result = await provider.getQrCode('inst-01');
+
+    expect(http['post']).not.toHaveBeenCalled();
+    expect(http['get']).toHaveBeenCalledWith('/instance/connect/inst-01');
+    expect(result.qrCode).toBe('data:image/png;base64,BBB');
+  });
+
   it('getStatus mapeia o state retornado pela Evolution', async () => {
     const http = getAxios(provider);
     http['get']!.mockResolvedValueOnce({ data: { instance: { state: 'open' } } });
