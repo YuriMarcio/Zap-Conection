@@ -55,6 +55,15 @@ describe('api/instances', () => {
     expect(typeof body.instance.id).toBe('string');
   });
 
+  it('GET /health responde 200 sem exigir x-api-key, mesmo com FLOWBRIDGE_API_KEY configurada', async () => {
+    const { app } = makeApp({ apiKey: 'secret' });
+
+    const response = await app.inject({ method: 'GET', url: '/health' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: 'ok' });
+  });
+
   it('POST /v1/instances sem x-api-key retorna 401 quando FLOWBRIDGE_API_KEY está configurada', async () => {
     const { app } = makeApp({ apiKey: 'secret' });
 

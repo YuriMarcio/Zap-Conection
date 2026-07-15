@@ -1,5 +1,6 @@
 import type { CommunicationProvider, WhatsAppProviderName } from '../core/interfaces/CommunicationProvider.js';
 import type { EventPublisher } from '../core/interfaces/EventPublisher.js';
+import type { InstanceRepository } from '../core/interfaces/InstanceRepository.js';
 import type { Logger } from '../core/interfaces/Logger.js';
 import type { ProviderRegistry } from '../registry/ProviderRegistry.js';
 import { ZApiProvider } from '../providers/zapi/ZApiProvider.js';
@@ -14,14 +15,21 @@ export type { InstanceCredentials } from '../contracts/requests/index.js';
  * A Evolution já é multi-tenant nativamente (um client, N instanceId) — usa sempre o provider
  * compartilhado do ProviderRegistry (registrado uma vez a partir das env vars, igual ao SDK
  * embutido). Z-API e Meta Cloud API não têm esse conceito: cada client representa uma única
- * credencial fixa. Por isso, para essas duas, esta classe constrói (e reaproveita) um provider
- * por instância a partir das credenciais informadas na criação da instância.
+ * credencial fixa. Por isso, para essas duas, esta classe constrói (e reaproveita em memória)
+ * um provider por instância a partir das credenciais informadas na criação da instância.
+ *
+ * Como o cache em memória (`perInstanceProviders`) não sobrevive a um restart do processo,
+ * `resolve()` sabe reconstruir o provider a partir do `Instance` persistido no
+ * `InstanceRepository` (que guarda `credentials`) quando o cache não tem a entrada — sem isso,
+ * uma instância zapi/meta "existiria" nos metadados depois de um restart mas não conseguiria
+ * mais enviar mensagem.
  */
 export class InstanceProviderRegistry {
   private readonly perInstanceProviders = new Map<string, CommunicationProvider>();
 
   constructor(
     private readonly sharedRegistry: ProviderRegistry,
+    private readonly instanceRepository: InstanceRepository,
     private readonly logger: Logger,
     private readonly eventPublisher?: EventPublisher,
   ) {}
@@ -31,17 +39,45 @@ export class InstanceProviderRegistry {
       return this.sharedRegistry.resolve('evolution');
     }
 
+    const provider = this.buildProvider(providerName, credentials);
+    this.perInstanceProviders.set(instanceId, provider);
+    return provider;
+  }
+
+  async resolve(instanceId: string, providerName: WhatsAppProviderName): Promise<CommunicationProvider> {
+    if (providerName === 'evolution') {
+      return this.sharedRegistry.resolve('evolution');
+    }
+
+    const cached = this.perInstanceProviders.get(instanceId);
+    if (cached) return cached;
+
+    // Cache vazio (ex.: depois de um restart do processo) — reconstrói a partir do que foi
+    // persistido na criação da instância.
+    const instance = await this.instanceRepository.findById(instanceId);
+    if (instance?.credentials) {
+      const provider = this.buildProvider(providerName, instance.credentials as InstanceCredentials);
+      this.perInstanceProviders.set(instanceId, provider);
+      return provider;
+    }
+
+    throw new Error(`Instância "${instanceId}" não encontrada (provider "${providerName}" não foi criado nesta instância da API).`);
+  }
+
+  delete(instanceId: string): void {
+    this.perInstanceProviders.delete(instanceId);
+  }
+
+  private buildProvider(providerName: Exclude<WhatsAppProviderName, 'evolution'>, credentials?: InstanceCredentials): CommunicationProvider {
     if (providerName === 'zapi') {
       if (!credentials?.instanceId || !credentials.token) {
         throw new Error('Credenciais da Z-API (instanceId, token) são obrigatórias para criar esta instância.');
       }
-      const provider = new ZApiProvider(
+      return new ZApiProvider(
         { name: 'zapi', instanceId: credentials.instanceId, token: credentials.token, clientToken: credentials.clientToken },
         this.logger,
         this.eventPublisher,
       );
-      this.perInstanceProviders.set(instanceId, provider);
-      return provider;
     }
 
     if (providerName !== 'meta') {
@@ -52,7 +88,7 @@ export class InstanceProviderRegistry {
     if (!credentials?.phoneNumberId || !credentials.accessToken) {
       throw new Error('Credenciais da Meta Cloud API (phoneNumberId, accessToken) são obrigatórias para criar esta instância.');
     }
-    const provider = new MetaCloudApiProvider(
+    return new MetaCloudApiProvider(
       {
         name: 'meta',
         phoneNumberId: credentials.phoneNumberId,
@@ -64,23 +100,5 @@ export class InstanceProviderRegistry {
       this.logger,
       this.eventPublisher,
     );
-    this.perInstanceProviders.set(instanceId, provider);
-    return provider;
-  }
-
-  resolve(instanceId: string, providerName: WhatsAppProviderName): CommunicationProvider {
-    if (providerName === 'evolution') {
-      return this.sharedRegistry.resolve('evolution');
-    }
-
-    const provider = this.perInstanceProviders.get(instanceId);
-    if (!provider) {
-      throw new Error(`Instância "${instanceId}" não encontrada (provider "${providerName}" não foi criado nesta instância da API).`);
-    }
-    return provider;
-  }
-
-  delete(instanceId: string): void {
-    this.perInstanceProviders.delete(instanceId);
   }
 }

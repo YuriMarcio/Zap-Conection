@@ -31,6 +31,7 @@ export class InstanceController {
       provider: body.provider,
       state: 'connecting',
       callbackUrl: body.callbackUrl,
+      credentials: body.credentials as Record<string, string> | undefined,
       createdAt: new Date().toISOString(),
     });
 
@@ -67,7 +68,7 @@ export class InstanceController {
     const instance = await this.requireInstance(id, reply);
     if (!instance) return;
 
-    const provider = this.instanceProviderRegistry.resolve(id, instance.provider);
+    const provider = await this.instanceProviderRegistry.resolve(id, instance.provider);
     reply.send(await provider.getStatus(id));
   };
 
@@ -76,7 +77,7 @@ export class InstanceController {
     const instance = await this.requireInstance(id, reply);
     if (!instance) return;
 
-    const provider = this.instanceProviderRegistry.resolve(id, instance.provider);
+    const provider = await this.instanceProviderRegistry.resolve(id, instance.provider);
     await provider.disconnect(id);
     this.instanceProviderRegistry.delete(id);
     await this.instanceRepository.delete(id);
@@ -89,7 +90,7 @@ export class InstanceController {
     const instance = await this.requireInstance(id, reply);
     if (!instance) return;
 
-    const provider = this.instanceProviderRegistry.resolve(id, instance.provider);
+    const provider = await this.instanceProviderRegistry.resolve(id, instance.provider);
     const valid = await provider.checkNumbers(id, numbers);
     reply.send({ valid });
   };

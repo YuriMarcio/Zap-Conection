@@ -312,10 +312,58 @@ curl -X POST https://flowbridge.seudominio.com/v1/instances/SEU_ID/messages/text
 Todas as rotas (exceto `/v1/webhooks/*`) exigem o header `x-api-key` quando
 `FLOWBRIDGE_API_KEY` está configurada — requisição sem a chave certa recebe `401`.
 
-> [!WARNING]
-> Nesta primeira versão, `InstanceRepository` é **em memória** (reinicia zerado a cada
-> deploy) e o repasse de eventos é HTTP direto para `callbackUrl` (sem fila/retry). Documentado
-> como MVP — vira banco + fila real depois, sem exigir mudanças em Core/Providers.
+> [!NOTE]
+> `InstanceRepository` persiste em **MySQL** (`MySqlInstanceRepository`) — instâncias
+> sobrevivem a restart/redeploy do container, credenciais incluídas: `InstanceProviderRegistry`
+> reconstrói o `CommunicationProvider` de cada instância zapi/meta a partir do que está salvo
+> no banco assim que ele é usado de novo depois de um restart. O repasse de eventos continua
+> HTTP direto pra `callbackUrl` (sem fila/retry) — documentado como o próximo passo.
+
+Todas as rotas (exceto `/v1/webhooks/*`) exigem o header `x-api-key` quando
+`FLOWBRIDGE_API_KEY` está configurada — requisição sem a chave certa recebe `401`.
+
+### 🐳 Rodando com Docker (recomendado para produção)
+
+`docker compose` sobe três serviços: a API (`flowbridge`), o banco (`mysql`) e uma UI de
+administração do banco (`adminer`) — é a forma recomendada de rodar, porque a API **exige**
+MySQL configurado pra subir (sem isso, falha explicitamente no boot em vez de voltar a guardar
+instância só em memória).
+
+```bash
+cp .env.example .env
+# preencha FLOWBRIDGE_API_KEY, FLOWBRIDGE_PUBLIC_URL, MYSQL_PASSWORD, MYSQL_ROOT_PASSWORD
+# (não precisa mexer em MYSQL_HOST — o compose já aponta pro serviço "mysql" automaticamente)
+
+docker compose up -d --build
+docker compose logs -f flowbridge   # acompanhar
+docker compose down                 # parar (o volume mysql-data preserva os dados)
+```
+
+- **API**: `http://localhost:3000` (`PORT` no `.env`)
+- **Adminer** (UI web do MySQL): `http://localhost:8080` — sistema **MySQL**, servidor
+  `mysql`, usuário/senha = `MYSQL_USER`/`MYSQL_PASSWORD` do `.env`, banco `MYSQL_DATABASE`.
+  Dá pra inspecionar/editar a tabela `instances` direto por ali, sem instalar cliente MySQL.
+
+> [!CAUTION]
+> A coluna `instances.credentials` guarda os segredos de cada instância (token da Z-API,
+> access token da Meta) como **JSON em texto plano** — é o preço de reconstruir o provider
+> automaticamente depois de um restart. Nunca exponha as portas do MySQL (`3306`) nem do
+> Adminer (`8080`) publicamente sem VPN/rede privada, trate dump/backup do banco como material
+> sensível, e restrinja `MYSQL_PASSWORD`/`MYSQL_ROOT_PASSWORD` como qualquer outro segredo (não
+> commitar `.env`, já coberto pelo `.gitignore`).
+
+Sem `docker compose` (ex.: MySQL já existe em outro lugar — RDS, Cloud SQL etc.), basta apontar
+`MYSQL_HOST`/`MYSQL_PORT`/`MYSQL_USER`/`MYSQL_PASSWORD`/`MYSQL_DATABASE` pra ele no `.env` e
+rodar só o container da API:
+
+```bash
+docker build -t flowbridge .
+docker run -d --name flowbridge -p 3000:3000 --env-file .env --restart unless-stopped flowbridge
+```
+
+A imagem é multi-stage (build compila TS, runtime só leva `dist/` + deps de produção, roda
+como usuário não-root) e expõe `GET /health` sem autenticação — usado pelo `HEALTHCHECK` da
+própria imagem e serve pra load balancer/orquestrador (k8s liveness probe, etc.) apontar pra lá.
 
 <br>
 
@@ -429,18 +477,19 @@ src/
                      cada um implementa CommunicationProvider (+ parseWebhookPayload), isolados entre si
   registry/        → ProviderRegistry — único lugar que resolve provider por *tipo*
   application/     → use-cases (SDK embutido) + InstanceProviderRegistry (multi-tenant da API) + factory
-  infrastructure/  → ConsoleLogger · wrapper HTTP compartilhado · InMemoryInstanceRepository ·
-                     HttpForwardingEventPublisher
+  infrastructure/  → ConsoleLogger · wrapper HTTP compartilhado · MySqlInstanceRepository
+                     (produção) / InMemoryInstanceRepository (testes) · HttpForwardingEventPublisher
   api/             → Fastify — routes/controllers/middlewares + buildServer() (testável via
                      app.inject()) + server.ts (entrypoint real, usado por `npm run dev`/`start`)
-  config/          → leitura de variáveis de ambiente por provider + da API
+  config/          → leitura de variáveis de ambiente por provider + da API + MySQL
   compat/          → EvolutionClient / createEvolutionClient legados (ver seção abaixo)
 ```
 
-Banco de dados de verdade, Redis, filas (RabbitMQ/Kafka) e o Dashboard Administrativo
-continuam **fora de escopo** — `InMemoryInstanceRepository` e `HttpForwardingEventPublisher`
-são o primeiro degrau, documentados como MVP, e podem virar implementações com banco/fila
-depois sem tocar em Core/Providers/`api/` (só a peça de `infrastructure/` muda).
+Redis, filas (RabbitMQ/Kafka) e o Dashboard Administrativo continuam **fora de escopo** — o
+repasse de eventos (`HttpForwardingEventPublisher`) é o próximo a virar fila real; troca por
+outra implementação de `EventPublisher`/`InstanceRepository` sem tocar em Core/Providers/`api/`
+(só a peça de `infrastructure/` muda — foi exatamente assim que `InstanceRepository` saiu de
+em-memória pra MySQL).
 
 </details>
 
