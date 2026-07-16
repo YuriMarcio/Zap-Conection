@@ -18,6 +18,7 @@ function makeProvider() {
   const logger = new ConsoleLogger();
   vi.spyOn(logger, 'error').mockImplementation(() => {});
   vi.spyOn(logger, 'warn').mockImplementation(() => {});
+  vi.spyOn(logger, 'debug').mockImplementation(() => {});
   const provider = new EvolutionProvider({ name: 'evolution', baseUrl: 'https://evolution.test', apiKey: 'key' }, logger);
   return provider;
 }
@@ -95,15 +96,27 @@ describe('EvolutionProvider', () => {
     expect(result.qrCode).toBe('data:image/png;base64,AAA');
   });
 
-  it('getQrCode busca um QR novo sem chamar /instance/create de novo', async () => {
+  it('getQrCode faz logout antes de buscar o QR (limpa sessão Baileys obsoleta) e não recria a instância', async () => {
     const http = getAxios(provider);
+    http['delete']!.mockResolvedValueOnce({ data: {} });
     http['get']!.mockResolvedValueOnce({ data: { qrcode: { base64: 'data:image/png;base64,BBB' } } });
 
     const result = await provider.getQrCode('inst-01');
 
     expect(http['post']).not.toHaveBeenCalled();
+    expect(http['delete']).toHaveBeenCalledWith('/instance/logout/inst-01');
     expect(http['get']).toHaveBeenCalledWith('/instance/connect/inst-01');
     expect(result.qrCode).toBe('data:image/png;base64,BBB');
+  });
+
+  it('getQrCode busca o QR mesmo se o logout falhar (instância pode nunca ter conectado)', async () => {
+    const http = getAxios(provider);
+    http['delete']!.mockRejectedValueOnce(new Error('nada pra deslogar'));
+    http['get']!.mockResolvedValueOnce({ data: { qrcode: { base64: 'data:image/png;base64,CCC' } } });
+
+    const result = await provider.getQrCode('inst-01');
+
+    expect(result.qrCode).toBe('data:image/png;base64,CCC');
   });
 
   it('getStatus mapeia o state retornado pela Evolution', async () => {

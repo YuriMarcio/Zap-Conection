@@ -1,5 +1,5 @@
 import type { EvolutionProviderConfig, MetaProviderConfig, ZApiProviderConfig } from '../contracts/dto/index.js';
-import type { MySqlConfig } from '../infrastructure/persistence/MySqlInstanceRepository.js';
+import type { PostgresConfig } from '../infrastructure/persistence/PostgresInstanceRepository.js';
 
 /**
  * Centraliza a leitura de variáveis de ambiente por provider (antes espalhada dentro de
@@ -74,23 +74,21 @@ export function readApiEnv(): ApiEnvConfig {
 }
 
 /**
- * Configuração do MySQL usado para persistir instâncias (`MySqlInstanceRepository`) — a API
- * HTTP real (`api/server.ts`) exige essas variáveis; sem elas, falha explicitamente no boot em
+ * Configuração do Postgres usado para persistir instâncias (`PostgresInstanceRepository`) —
+ * funciona com Supabase ou qualquer Postgres gerenciado, só precisa da connection string. A
+ * API HTTP real (`api/server.ts`) exige essa variável; sem ela, falha explicitamente no boot em
  * vez de cair silenciosamente em memória (que reintroduziria instâncias sendo perdidas a cada
  * restart).
  */
-export function readMySqlEnv(): MySqlConfig {
-  const host = process.env['MYSQL_HOST'];
-  const user = process.env['MYSQL_USER'];
-  const password = process.env['MYSQL_PASSWORD'];
-  const database = process.env['MYSQL_DATABASE'];
+export function readPostgresEnv(): PostgresConfig {
+  const connectionString = process.env['DATABASE_URL'];
 
-  if (!host || !user || !password || !database) {
+  if (!connectionString) {
     throw new Error(
-      '[FlowBridge API] MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD e MYSQL_DATABASE são obrigatórias ' +
-        '(persistência de instâncias). Ver .env.example.',
+      '[FlowBridge API] DATABASE_URL é obrigatória (persistência de instâncias) — connection string ' +
+        'do Postgres/Supabase. Ver .env.example.',
     );
   }
 
-  return { host, port: Number(process.env['MYSQL_PORT'] ?? 3306), user, password, database };
+  return { connectionString, ssl: process.env['DATABASE_SSL'] !== 'false' };
 }

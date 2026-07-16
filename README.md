@@ -314,48 +314,42 @@ Todas as rotas (exceto `/v1/webhooks/*`) exigem o header `x-api-key` quando
 `FLOWBRIDGE_API_KEY` está configurada — requisição sem a chave certa recebe `401`.
 
 > [!NOTE]
-> `InstanceRepository` persiste em **MySQL** (`MySqlInstanceRepository`) — instâncias
-> sobrevivem a restart/redeploy do container, credenciais incluídas: `InstanceProviderRegistry`
-> reconstrói o `CommunicationProvider` de cada instância zapi/meta a partir do que está salvo
-> no banco assim que ele é usado de novo depois de um restart. O repasse de eventos continua
-> HTTP direto pra `callbackUrl` (sem fila/retry) — documentado como o próximo passo.
-
-Todas as rotas (exceto `/v1/webhooks/*`) exigem o header `x-api-key` quando
-`FLOWBRIDGE_API_KEY` está configurada — requisição sem a chave certa recebe `401`.
+> `InstanceRepository` persiste em **Postgres** (`PostgresInstanceRepository`) — funciona com
+> Supabase ou qualquer Postgres gerenciado, só usa a connection string padrão (nenhuma API
+> específica do Supabase). Instâncias sobrevivem a restart/redeploy do container, credenciais
+> incluídas: `InstanceProviderRegistry` reconstrói o `CommunicationProvider` de cada instância
+> zapi/meta a partir do que está salvo no banco assim que ele é usado de novo depois de um
+> restart. O repasse de eventos continua HTTP direto pra `callbackUrl` (sem fila/retry) —
+> documentado como o próximo passo.
 
 ### 🐳 Rodando com Docker (recomendado para produção)
 
-`docker compose` sobe três serviços: a API (`flowbridge`), o banco (`mysql`) e uma UI de
-administração do banco (`adminer`) — é a forma recomendada de rodar, porque a API **exige**
-MySQL configurado pra subir (sem isso, falha explicitamente no boot em vez de voltar a guardar
-instância só em memória).
+O banco fica hospedado no Supabase (ou outro Postgres gerenciado) — o `docker-compose.yml` só
+sobe o container da API, sem serviço de banco local.
 
 ```bash
 cp .env.example .env
-# preencha FLOWBRIDGE_API_KEY, FLOWBRIDGE_PUBLIC_URL, MYSQL_PASSWORD, MYSQL_ROOT_PASSWORD
-# (não precisa mexer em MYSQL_HOST — o compose já aponta pro serviço "mysql" automaticamente)
+# preencha FLOWBRIDGE_API_KEY, FLOWBRIDGE_PUBLIC_URL, e DATABASE_URL
+# (DATABASE_URL vem do seu projeto Supabase: Project Settings → Database → Connection string)
 
 docker compose up -d --build
 docker compose logs -f flowbridge   # acompanhar
-docker compose down                 # parar (o volume mysql-data preserva os dados)
+docker compose down                 # parar
 ```
 
 - **API**: `http://localhost:3000` (`PORT` no `.env`)
-- **Adminer** (UI web do MySQL): `http://localhost:8080` — sistema **MySQL**, servidor
-  `mysql`, usuário/senha = `MYSQL_USER`/`MYSQL_PASSWORD` do `.env`, banco `MYSQL_DATABASE`.
-  Dá pra inspecionar/editar a tabela `instances` direto por ali, sem instalar cliente MySQL.
+- **Banco**: gerenciado pelo dashboard do Supabase (Table Editor / SQL Editor) — não precisa de
+  Adminer nem de nenhuma UI local, o Supabase já tem a própria.
 
 > [!CAUTION]
 > A coluna `instances.credentials` guarda os segredos de cada instância (token da Z-API,
 > access token da Meta) como **JSON em texto plano** — é o preço de reconstruir o provider
-> automaticamente depois de um restart. Nunca exponha as portas do MySQL (`3306`) nem do
-> Adminer (`8080`) publicamente sem VPN/rede privada, trate dump/backup do banco como material
-> sensível, e restrinja `MYSQL_PASSWORD`/`MYSQL_ROOT_PASSWORD` como qualquer outro segredo (não
-> commitar `.env`, já coberto pelo `.gitignore`).
+> automaticamente depois de um restart. Trate a tabela `instances` como dado sensível: restrinja
+> quem tem acesso ao projeto Supabase, nunca commite `DATABASE_URL` (já coberto pelo
+> `.gitignore`), e trate dump/backup do banco como material sensível.
 
-Sem `docker compose` (ex.: MySQL já existe em outro lugar — RDS, Cloud SQL etc.), basta apontar
-`MYSQL_HOST`/`MYSQL_PORT`/`MYSQL_USER`/`MYSQL_PASSWORD`/`MYSQL_DATABASE` pra ele no `.env` e
-rodar só o container da API:
+Sem `docker compose`, basta apontar `DATABASE_URL` pro Postgres/Supabase no `.env` e rodar só o
+container da API:
 
 ```bash
 docker build -t flowbridge .
@@ -478,19 +472,20 @@ src/
                      cada um implementa CommunicationProvider (+ parseWebhookPayload), isolados entre si
   registry/        → ProviderRegistry — único lugar que resolve provider por *tipo*
   application/     → use-cases (SDK embutido) + InstanceProviderRegistry (multi-tenant da API) + factory
-  infrastructure/  → ConsoleLogger · wrapper HTTP compartilhado · MySqlInstanceRepository
-                     (produção) / InMemoryInstanceRepository (testes) · HttpForwardingEventPublisher
+  infrastructure/  → ConsoleLogger · wrapper HTTP compartilhado · PostgresInstanceRepository
+                     (produção, Supabase ou outro Postgres) / InMemoryInstanceRepository (testes)
+                     · HttpForwardingEventPublisher
   api/             → Fastify — routes/controllers/middlewares + buildServer() (testável via
                      app.inject()) + server.ts (entrypoint real, usado por `npm run dev`/`start`)
-  config/          → leitura de variáveis de ambiente por provider + da API + MySQL
+  config/          → leitura de variáveis de ambiente por provider + da API + Postgres
   compat/          → EvolutionClient / createEvolutionClient legados (ver seção abaixo)
 ```
 
-Redis, filas (RabbitMQ/Kafka) e o Dashboard Administrativo continuam **fora de escopo** — o
-repasse de eventos (`HttpForwardingEventPublisher`) é o próximo a virar fila real; troca por
-outra implementação de `EventPublisher`/`InstanceRepository` sem tocar em Core/Providers/`api/`
-(só a peça de `infrastructure/` muda — foi exatamente assim que `InstanceRepository` saiu de
-em-memória pra MySQL).
+Filas (RabbitMQ/Kafka) e o Dashboard Administrativo continuam **fora de escopo** — o repasse de
+eventos (`HttpForwardingEventPublisher`) é o próximo a virar fila real; troca por outra
+implementação de `EventPublisher`/`InstanceRepository` sem tocar em Core/Providers/`api/` (só a
+peça de `infrastructure/` muda — foi exatamente assim que `InstanceRepository` saiu de
+em-memória pra Postgres).
 
 </details>
 

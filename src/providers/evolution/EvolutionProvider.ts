@@ -66,10 +66,26 @@ export class EvolutionProvider implements CommunicationProvider {
 
   /**
    * Sem `/instance/create` — a instância já existe. Chamar `connect()` de novo pra pegar um
-   * QR fresco arriscaria um erro de "instância já existe" no create; isso vai direto no
-   * `/instance/connect`, que a Evolution aceita chamar repetidamente na mesma instância.
+   * QR fresco arriscaria um erro de "instância já existe" no create.
+   *
+   * Faz logout antes de buscar o QR: reconectar sem isso arrisca a Evolution reaproveitar
+   * credenciais Baileys de uma tentativa de pareamento anterior que falhou/expirou, o que na
+   * prática trava em "connecting" e o WhatsApp recusa o pareamento (mesmo com um QR
+   * visualmente válido). Logout limpa esse estado sem apagar a instância nem o histórico —
+   * best-effort, ignora erro (ex.: instância que nunca chegou a conectar não tem o que
+   * deslogar).
    */
   async getQrCode(instanceId: string): Promise<ConnectResult> {
+    try {
+      await this.http.delete(`/instance/logout/${instanceId}`);
+    } catch (err) {
+      this.logger.debug('Logout antes de gerar novo QR falhou (ignorado — instância pode não estar conectada)', {
+        provider: this.name,
+        instanceId,
+        error: String(err),
+      });
+    }
+
     return this.fetchQrCode(instanceId);
   }
 

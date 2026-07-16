@@ -1,12 +1,12 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { InstanceProviderRegistry } from '../application/InstanceProviderRegistry.js';
-import { readApiEnv, readEvolutionEnv, readMySqlEnv } from '../config/env.js';
+import { readApiEnv, readEvolutionEnv, readPostgresEnv } from '../config/env.js';
 import type { EventPublisher } from '../core/interfaces/EventPublisher.js';
 import type { InstanceRepository } from '../core/interfaces/InstanceRepository.js';
 import type { Logger } from '../core/interfaces/Logger.js';
 import { HttpForwardingEventPublisher } from '../infrastructure/events/HttpForwardingEventPublisher.js';
 import { ConsoleLogger } from '../infrastructure/logging/ConsoleLogger.js';
-import { MySqlInstanceRepository } from '../infrastructure/persistence/MySqlInstanceRepository.js';
+import { PostgresInstanceRepository } from '../infrastructure/persistence/PostgresInstanceRepository.js';
 import { EvolutionProvider } from '../providers/evolution/EvolutionProvider.js';
 import { ProviderRegistry } from '../registry/ProviderRegistry.js';
 import { InstanceController } from './controllers/InstanceController.js';
@@ -42,10 +42,11 @@ export function buildServer(options: BuildServerOptions = {}): BuiltServer {
   const publicUrl = (options.publicUrl ?? apiEnv.publicUrl).replace(/\/$/, '');
   const apiKey = options.apiKey ?? apiEnv.apiKey;
 
-  // Sem opção explícita (caso real de produção, api/server.ts), persiste em MySQL — instâncias
-  // (e as credenciais necessárias pra reconstruir o provider) sobrevivem a um restart do
-  // processo/container. Testes sempre passam InMemoryInstanceRepository explicitamente.
-  const instanceRepository = options.instanceRepository ?? new MySqlInstanceRepository(readMySqlEnv(), logger);
+  // Sem opção explícita (caso real de produção, api/server.ts), persiste em Postgres (Supabase
+  // ou qualquer outro) — instâncias (e as credenciais necessárias pra reconstruir o provider)
+  // sobrevivem a um restart do processo/container. Testes sempre passam
+  // InMemoryInstanceRepository explicitamente.
+  const instanceRepository = options.instanceRepository ?? new PostgresInstanceRepository(readPostgresEnv(), logger);
   const eventPublisher = options.eventPublisher ?? new HttpForwardingEventPublisher(instanceRepository, logger);
 
   // Evolution é multi-tenant nativamente — um único provider compartilhado, configurado via
