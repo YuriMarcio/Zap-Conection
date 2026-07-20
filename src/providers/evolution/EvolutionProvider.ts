@@ -217,9 +217,12 @@ export class EvolutionProvider implements CommunicationProvider {
   async sendButtons(instanceId: string, to: string, content: ButtonsContent): Promise<SendResult> {
     const raw = await this.http.post(`/message/sendButtons/${instanceId}`, {
       number: to,
-      title: content.title,
+      // A Evolution monta o corpo da mensagem como `*${title}*\n\n${description}` sem checar
+      // se `title` existe — omitir o campo faz ela interpolar a string literal "undefined"
+      // no texto enviado ao destinatário. String vazia evita isso (vira "**", inofensivo).
+      title: content.title ?? '',
       description: content.body,
-      footer: content.footer,
+      footer: content.footer ?? '',
       thumbnailUrl: content.imageUrl,
       buttons: content.buttons.map((button) => ({ type: 'reply', displayText: button.displayText, id: button.id })),
       delay: 1000,

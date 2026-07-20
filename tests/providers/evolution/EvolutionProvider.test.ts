@@ -151,6 +151,21 @@ describe('EvolutionProvider', () => {
     );
   });
 
+  it('sendButtons sem title/footer manda string vazia (evita "*undefined*" no corpo da mensagem)', async () => {
+    const http = getAxios(provider);
+    http['post']!.mockResolvedValueOnce({ data: {} });
+
+    await provider.sendButtons('inst-01', '5598999990000', {
+      body: 'Corpo sem título',
+      buttons: [{ id: 'BTN_SIM', displayText: 'Sim' }],
+    });
+
+    expect(http['post']).toHaveBeenCalledWith(
+      '/message/sendButtons/inst-01',
+      expect.objectContaining({ title: '', footer: '' }),
+    );
+  });
+
   it('sendReaction monta o remoteJid a partir do número', async () => {
     const http = getAxios(provider);
     http['post']!.mockResolvedValueOnce({ data: {} });
