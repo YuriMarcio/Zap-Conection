@@ -35,10 +35,25 @@ export class WebhookController {
     let events;
     try {
       events = providerImpl.parseWebhookPayload(rawBody, headers);
+      if (events.length === 0) {
+        this.logger.info('Webhook recebido sem eventos mapeados (payload ignorado pelo parser)', {
+          provider,
+          instanceId,
+          rawBody: rawBody.toString('utf8').slice(0, 2000),
+        });
+      }
     } catch (err) {
       this.logger.warn('Falha ao processar webhook recebido', { provider, instanceId, error: String(err) });
       reply.code(401).send({ error: 'Webhook inválido.' });
       return;
+    }
+
+    if (events.length > 0) {
+      this.logger.info('Webhook recebido, publicando eventos', {
+        provider,
+        instanceId,
+        eventTypes: events.map((event) => event.type),
+      });
     }
 
     for (const event of events) {

@@ -35,7 +35,9 @@ export class InstanceController {
       createdAt: new Date().toISOString(),
     });
 
-    const connectResult = await provider.connect(id);
+    const connectResult = body.provider === 'evolution' && body.existing === true
+      ? await provider.getQrCode(id)
+      : await provider.connect(id);
 
     try {
       await provider.setWebhook(id, {

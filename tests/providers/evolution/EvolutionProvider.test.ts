@@ -98,6 +98,7 @@ describe('EvolutionProvider', () => {
 
   it('getQrCode faz logout antes de buscar o QR (limpa sessão Baileys obsoleta) e não recria a instância', async () => {
     const http = getAxios(provider);
+    http['get']!.mockResolvedValueOnce({ data: { instance: { state: 'close' } } }); // connectionState check
     http['delete']!.mockResolvedValueOnce({ data: {} });
     http['get']!.mockResolvedValueOnce({ data: { qrcode: { base64: 'data:image/png;base64,BBB' } } });
 
@@ -111,12 +112,36 @@ describe('EvolutionProvider', () => {
 
   it('getQrCode busca o QR mesmo se o logout falhar (instância pode nunca ter conectado)', async () => {
     const http = getAxios(provider);
+    http['get']!.mockResolvedValueOnce({ data: { instance: { state: 'connecting' } } }); // connectionState check
     http['delete']!.mockRejectedValueOnce(new Error('nada pra deslogar'));
     http['get']!.mockResolvedValueOnce({ data: { qrcode: { base64: 'data:image/png;base64,CCC' } } });
 
     const result = await provider.getQrCode('inst-01');
 
     expect(result.qrCode).toBe('data:image/png;base64,CCC');
+  });
+
+  it('getQrCode não deslogo instância já conectada — retorna status connected direto', async () => {
+    const http = getAxios(provider);
+    http['get']!.mockResolvedValueOnce({ data: { instance: { state: 'open' } } }); // connectionState check
+
+    const result = await provider.getQrCode('inst-01');
+
+    expect(http['delete']).not.toHaveBeenCalled();
+    expect(http['get']).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: 'connected', raw: { instance: { state: 'open' } } });
+  });
+
+  it('getQrCode segue o fluxo normal se a checagem de status falhar', async () => {
+    const http = getAxios(provider);
+    http['get']!.mockRejectedValueOnce(new Error('instância desconhecida')); // connectionState check falha
+    http['delete']!.mockResolvedValueOnce({ data: {} });
+    http['get']!.mockResolvedValueOnce({ data: { qrcode: { base64: 'data:image/png;base64,DDD' } } });
+
+    const result = await provider.getQrCode('inst-01');
+
+    expect(http['delete']).toHaveBeenCalledWith('/instance/logout/inst-01');
+    expect(result.qrCode).toBe('data:image/png;base64,DDD');
   });
 
   it('getStatus mapeia o state retornado pela Evolution', async () => {

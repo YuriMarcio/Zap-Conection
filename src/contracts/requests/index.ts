@@ -118,4 +118,6 @@ export interface CreateInstanceApiRequest {
   credentials?: InstanceCredentials;
   /** URL para onde a API repassa os eventos normalizados desta instância. */
   callbackUrl?: string;
+  /** Evolution instance already exists and only needs a fresh QR code. */
+  existing?: boolean;
 }

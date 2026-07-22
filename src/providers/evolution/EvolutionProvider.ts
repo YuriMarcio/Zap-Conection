@@ -68,14 +68,21 @@ export class EvolutionProvider implements CommunicationProvider {
    * Sem `/instance/create` — a instância já existe. Chamar `connect()` de novo pra pegar um
    * QR fresco arriscaria um erro de "instância já existe" no create.
    *
-   * Faz logout antes de buscar o QR: reconectar sem isso arrisca a Evolution reaproveitar
-   * credenciais Baileys de uma tentativa de pareamento anterior que falhou/expirou, o que na
-   * prática trava em "connecting" e o WhatsApp recusa o pareamento (mesmo com um QR
-   * visualmente válido). Logout limpa esse estado sem apagar a instância nem o histórico —
-   * best-effort, ignora erro (ex.: instância que nunca chegou a conectar não tem o que
-   * deslogar).
+   * Antes de mexer em qualquer coisa, checa o estado atual: se a instância já está `open`,
+   * retorna conectado sem deslogar — deslogar uma sessão que já funciona derrubaria um WhatsApp
+   * ativo à toa. Só quando ela NÃO está aberta é que faz logout antes de buscar o QR: reconectar
+   * sem isso arrisca a Evolution reaproveitar credenciais Baileys de uma tentativa de pareamento
+   * anterior que falhou/expirou, o que na prática trava em "connecting" e o WhatsApp recusa o
+   * pareamento (mesmo com um QR visualmente válido). Logout limpa esse estado sem apagar a
+   * instância nem o histórico — best-effort, ignora erro (ex.: instância que nunca chegou a
+   * conectar não tem o que deslogar).
    */
   async getQrCode(instanceId: string): Promise<ConnectResult> {
+    const currentStatus = await this.getStatus(instanceId).catch(() => null);
+    if (currentStatus?.state === 'open') {
+      return { status: 'connected', raw: currentStatus.raw };
+    }
+
     try {
       await this.http.delete(`/instance/logout/${instanceId}`);
     } catch (err) {
@@ -219,8 +226,9 @@ export class EvolutionProvider implements CommunicationProvider {
       number: to,
       // A Evolution monta o corpo da mensagem como `*${title}*\n\n${description}` sem checar
       // se `title` existe — omitir o campo faz ela interpolar a string literal "undefined"
-      // no texto enviado ao destinatário. String vazia evita isso (vira "**", inofensivo).
-      title: content.title ?? '',
+      // no texto enviado ao destinatário, e título vazio vira "**" solto na mensagem. Por
+      // isso sempre mandamos um título não-vazio (fallback pro nome da marca).
+      title: content.title?.trim() ? content.title : 'Zapediu',
       description: content.body,
       footer: content.footer ?? '',
       thumbnailUrl: content.imageUrl,
