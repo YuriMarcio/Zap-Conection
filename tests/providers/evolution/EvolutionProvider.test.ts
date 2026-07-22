@@ -191,6 +191,63 @@ describe('EvolutionProvider', () => {
     );
   });
 
+  it('sendCarousel envia cada botão de card com "type" explícito (reply/url/call/copy)', async () => {
+    const http = getAxios(provider);
+    http['post']!.mockResolvedValueOnce({ data: {} });
+
+    await provider.sendCarousel('inst-01', '5511999999999', {
+      body: 'Confira nossos produtos em destaque:',
+      cards: [
+        {
+          title: 'Produto A',
+          body: 'Descrição do Produto A.',
+          footer: 'Frete grátis',
+          imageUrl: 'https://exemplo.com/imagens/produto-a.jpg',
+          buttons: [
+            { type: 'url', displayText: 'Ver produto', url: 'https://loja.exemplo.com/produto-a' },
+            { type: 'reply', displayText: 'Tenho interesse', id: 'interesse_produto_a' },
+          ],
+        },
+        {
+          title: 'Produto B',
+          body: 'Descrição do Produto B.',
+          footer: 'Últimas unidades',
+          buttons: [
+            { type: 'call', displayText: 'Ligar para vendas', phoneNumber: '5511988887777' },
+            { type: 'copy', displayText: 'Copiar cupom', copyCode: 'DESCONTO10' },
+          ],
+        },
+      ],
+    });
+
+    expect(http['post']).toHaveBeenCalledWith('/message/sendCarousel/inst-01', {
+      number: '5511999999999',
+      body: 'Confira nossos produtos em destaque:',
+      delay: 1000,
+      cards: [
+        {
+          title: 'Produto A',
+          body: 'Descrição do Produto A.',
+          footer: 'Frete grátis',
+          imageUrl: 'https://exemplo.com/imagens/produto-a.jpg',
+          buttons: [
+            { type: 'url', displayText: 'Ver produto', url: 'https://loja.exemplo.com/produto-a' },
+            { type: 'reply', displayText: 'Tenho interesse', id: 'interesse_produto_a' },
+          ],
+        },
+        {
+          title: 'Produto B',
+          body: 'Descrição do Produto B.',
+          footer: 'Últimas unidades',
+          buttons: [
+            { type: 'call', displayText: 'Ligar para vendas', phoneNumber: '5511988887777' },
+            { type: 'copy', displayText: 'Copiar cupom', copyCode: 'DESCONTO10' },
+          ],
+        },
+      ],
+    });
+  });
+
   it('sendReaction monta o remoteJid a partir do número', async () => {
     const http = getAxios(provider);
     http['post']!.mockResolvedValueOnce({ data: {} });

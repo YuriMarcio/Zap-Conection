@@ -248,13 +248,16 @@ export class MetaCloudApiProvider implements CommunicationProvider {
               components: [
                 ...(card.imageUrl ? [{ type: 'header', parameters: [{ type: 'image', image: { link: card.imageUrl } }] }] : []),
                 { type: 'body', parameters: [{ type: 'text', text: card.body }] },
-                ...(card.buttons[0]
+                // Templates de carrossel da Meta só suportam quick_reply pré-aprovado — botões
+                // url/call/copy do card (que a Evolution aceita) não têm equivalente aqui e são
+                // ignorados nesse componente.
+                ...(card.buttons[0]?.type === 'reply'
                   ? [
                       {
                         type: 'button',
                         sub_type: 'quick_reply',
                         index: '0',
-                        parameters: [{ type: 'payload', payload: card.buttons[0].id }],
+                        parameters: [{ type: 'payload', payload: card.buttons[0].id ?? card.buttons[0].displayText }],
                       },
                     ]
                   : []),

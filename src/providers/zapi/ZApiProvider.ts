@@ -205,7 +205,22 @@ export class ZApiProvider implements CommunicationProvider {
       carousel: content.cards.map((card) => ({
         text: card.body,
         image: card.imageUrl,
-        buttons: card.buttons.map((button) => ({ type: 'REPLY', label: button.displayText, id: button.id })),
+        // Payload não verificado contra documentação real da Z-API (ao contrário do fix da
+        // Evolution, confirmado com o schema real) — mantém compatibilidade com o formato REPLY
+        // anterior e faz o melhor esforço pros demais tipos, mas vale validar contra uma
+        // instância real antes de depender em produção.
+        buttons: card.buttons.map((button) => {
+          switch (button.type) {
+            case 'reply':
+              return { type: 'REPLY', label: button.displayText, id: button.id };
+            case 'url':
+              return { type: 'URL', label: button.displayText, url: button.url };
+            case 'call':
+              return { type: 'CALL', label: button.displayText, phone: button.phoneNumber };
+            case 'copy':
+              return { type: 'COPY', label: button.displayText, copyCode: button.copyCode };
+          }
+        }),
       })),
     });
     return this.toSendResult(raw);

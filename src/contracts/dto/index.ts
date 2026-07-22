@@ -6,9 +6,14 @@
 
 export type {
   ButtonsContent,
+  CarouselButton,
+  CarouselCallButton,
   CarouselCard,
   CarouselContent,
+  CarouselCopyButton,
   CarouselProviderOptions,
+  CarouselReplyButton,
+  CarouselUrlButton,
   ConnectResult,
   InstanceStatus,
   ListContent,

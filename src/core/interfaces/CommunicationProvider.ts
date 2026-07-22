@@ -14,12 +14,47 @@ export interface ReplyButton {
   displayText: string;
 }
 
+/**
+ * Botões de card de carrossel. Ao contrário de `ReplyButton` (usado em `sendButtons`, sempre
+ * `reply`), a Evolution exige `type` explícito por botão do carrossel — `reply`, `url`, `call`
+ * ou `copy` — cada um com seu próprio campo obrigatório (`id`, `url`, `phoneNumber`,
+ * `copyCode`). `pix` existe em `sendButtons` mas a Evolution rejeita com 400 dentro de um
+ * carrossel, por isso não faz parte desta união.
+ */
+export interface CarouselReplyButton {
+  type: 'reply';
+  displayText: string;
+  /** Opcional — a Evolution gera um id automaticamente quando omitido. */
+  id?: string;
+}
+
+export interface CarouselUrlButton {
+  type: 'url';
+  displayText: string;
+  url: string;
+}
+
+export interface CarouselCallButton {
+  type: 'call';
+  displayText: string;
+  phoneNumber: string;
+}
+
+export interface CarouselCopyButton {
+  type: 'copy';
+  displayText: string;
+  copyCode: string;
+}
+
+export type CarouselButton = CarouselReplyButton | CarouselUrlButton | CarouselCallButton | CarouselCopyButton;
+
 export interface CarouselCard {
   title?: string;
   body: string;
   footer?: string;
   imageUrl?: string;
-  buttons: ReplyButton[];
+  /** 1 a 3 botões por card — limite da Evolution, validado no servidor. */
+  buttons: CarouselButton[];
 }
 
 export interface ListSectionRow {
