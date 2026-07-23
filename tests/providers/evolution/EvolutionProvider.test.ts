@@ -35,7 +35,7 @@ describe('EvolutionProvider', () => {
     provider = makeProvider();
   });
 
-  it('sendText envia payload correto com delay padrão', async () => {
+  it('sendText envia payload sem delay por padrão (resposta imediata)', async () => {
     const http = getAxios(provider);
     http['post']!.mockResolvedValueOnce({ data: { key: { id: 'abc123' } } });
 
@@ -44,7 +44,6 @@ describe('EvolutionProvider', () => {
     expect(http['post']).toHaveBeenCalledWith('/message/sendText/inst-01', {
       number: '5598999990000',
       text: 'Olá!',
-      delay: 1200,
     });
     expect(result.messageId).toBe('abc123');
   });
@@ -266,7 +265,6 @@ describe('EvolutionProvider', () => {
     expect(http['post']).toHaveBeenCalledWith('/message/sendCarousel/inst-01', {
       number: '5511999999999',
       body: 'Confira nossos produtos em destaque:',
-      delay: 1000,
       cards: [
         {
           title: 'Produto A',

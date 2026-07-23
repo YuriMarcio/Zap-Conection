@@ -163,7 +163,9 @@ export class EvolutionProvider implements CommunicationProvider {
     const raw = await this.http.post(`/message/sendText/${instanceId}`, {
       number: to,
       text,
-      delay: options?.delayMs ?? 1200,
+      // Sem delay por padrão — resposta imediata. `delayMs` opcional reativa a simulação
+      // de digitação da Evolution por mensagem (útil pra disparos em massa, anti-ban).
+      ...(options?.delayMs ? { delay: options.delayMs } : {}),
     });
     return this.toSendResult(raw);
   }
@@ -237,7 +239,6 @@ export class EvolutionProvider implements CommunicationProvider {
       buttons: content.buttons.map((button) =>
         'type' in button ? button : { type: 'reply', displayText: button.displayText, id: button.id },
       ),
-      delay: 1000,
     });
     return this.toSendResult(raw);
   }
@@ -266,7 +267,6 @@ export class EvolutionProvider implements CommunicationProvider {
       number: to,
       body: content.body,
       cards: content.cards,
-      delay: 1000,
     });
     return this.toSendResult(raw);
   }
