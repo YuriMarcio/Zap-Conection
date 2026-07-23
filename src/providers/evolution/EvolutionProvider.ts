@@ -232,7 +232,11 @@ export class EvolutionProvider implements CommunicationProvider {
       description: content.body,
       footer: content.footer ?? '',
       thumbnailUrl: content.imageUrl,
-      buttons: content.buttons.map((button) => ({ type: 'reply', displayText: button.displayText, id: button.id })),
+      // Botão sem `type` é a forma legada (ReplyButton) — vira reply. Botões tipados
+      // (url/call/copy/reply) já estão no shape que a Evolution espera, passam direto.
+      buttons: content.buttons.map((button) =>
+        'type' in button ? button : { type: 'reply', displayText: button.displayText, id: button.id },
+      ),
       delay: 1000,
     });
     return this.toSendResult(raw);

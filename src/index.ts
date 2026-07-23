@@ -83,6 +83,7 @@ export type {
   SmbAppStateSyncWebhookPayload,
   SmbMessageEchoWebhookPayload,
   ReplyButton as WhatsAppReplyButton,
+  ActionButton as WhatsAppActionButton,
   CarouselCard as WhatsAppCarouselCard,
   CarouselButton as WhatsAppCarouselButton,
   CarouselReplyButton as WhatsAppCarouselReplyButton,

@@ -173,7 +173,12 @@ export class ZApiProvider implements CommunicationProvider {
       phone: to,
       message: content.body,
       buttonList: {
-        buttons: content.buttons.map((button) => ({ label: button.displayText, id: button.id })),
+        // Z-API (/send-button-list) só suporta botões de resposta — url/call/copy degradam
+        // pra reply com o mesmo texto (id ausente deixa a Z-API gerar um).
+        buttons: content.buttons.map((button) => ({
+          label: button.displayText,
+          id: 'id' in button ? button.id : undefined,
+        })),
       },
     });
     return this.toSendResult(raw);

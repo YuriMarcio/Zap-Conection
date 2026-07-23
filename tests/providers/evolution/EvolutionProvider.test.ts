@@ -191,6 +191,32 @@ describe('EvolutionProvider', () => {
     );
   });
 
+  it('sendButtons aceita botões tipados (url/call/copy) e passa direto pro payload da Evolution', async () => {
+    const http = getAxios(provider);
+    http['post']!.mockResolvedValueOnce({ data: {} });
+
+    await provider.sendButtons('inst-01', '5598999990000', {
+      title: 'Título',
+      body: 'Corpo',
+      buttons: [
+        { type: 'call', displayText: 'Fale conosco', phoneNumber: '5598999990000' },
+        { type: 'url', displayText: 'Visite nosso site', url: 'https://exemplo.com' },
+        { id: 'BTN_ATENDENTE', displayText: 'Falar com atendente' },
+      ],
+    });
+
+    expect(http['post']).toHaveBeenCalledWith(
+      '/message/sendButtons/inst-01',
+      expect.objectContaining({
+        buttons: [
+          { type: 'call', displayText: 'Fale conosco', phoneNumber: '5598999990000' },
+          { type: 'url', displayText: 'Visite nosso site', url: 'https://exemplo.com' },
+          { type: 'reply', displayText: 'Falar com atendente', id: 'BTN_ATENDENTE' },
+        ],
+      }),
+    );
+  });
+
   it('sendList sem footer usa fallback em footerText (campo obrigatório na Evolution — 400 se ausente)', async () => {
     const http = getAxios(provider);
     http['post']!.mockResolvedValueOnce({ data: {} });

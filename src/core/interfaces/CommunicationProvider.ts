@@ -48,6 +48,13 @@ export interface CarouselCopyButton {
 
 export type CarouselButton = CarouselReplyButton | CarouselUrlButton | CarouselCallButton | CarouselCopyButton;
 
+/**
+ * Botões aceitos por `sendButtons`. `ReplyButton` (sem `type`) é a forma legada e equivale a
+ * `{ type: 'reply' }` — mantida na união para não quebrar consumidores existentes. As formas
+ * tipadas (`url`, `call`, `copy`, `reply`) reutilizam os mesmos shapes do carrossel.
+ */
+export type ActionButton = ReplyButton | CarouselButton;
+
 export interface CarouselCard {
   title?: string;
   body: string;
@@ -84,7 +91,7 @@ export interface ButtonsContent {
   body: string;
   footer?: string;
   imageUrl?: string;
-  buttons: ReplyButton[];
+  buttons: ActionButton[];
 }
 
 export interface ListContent {

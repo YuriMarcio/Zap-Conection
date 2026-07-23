@@ -5,6 +5,7 @@
 // ============================================================================
 
 export type {
+  ActionButton,
   ButtonsContent,
   CarouselButton,
   CarouselCallButton,
