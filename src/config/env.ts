@@ -17,7 +17,10 @@ export function readEvolutionEnv(): EvolutionProviderConfig | undefined {
     name: 'evolution',
     baseUrl,
     apiKey,
-    throwOnError: process.env['EVOLUTION_THROW_ON_ERROR'] === 'true',
+    // Opt-out: erro de provider vira ProviderApiException (mapeado pra 502 no errorHandler).
+    // Setar 'false' restaura o modo silencioso antigo (loga e retorna {} — mascara falhas
+    // como sucesso HTTP 200, ex.: sendList com 400 da Evolution virando {"raw":{}}).
+    throwOnError: process.env['EVOLUTION_THROW_ON_ERROR'] !== 'false',
     timeout: Number(process.env['EVOLUTION_TIMEOUT_MS'] ?? 15_000),
   };
 }
@@ -32,7 +35,7 @@ export function readZApiEnv(): ZApiProviderConfig | undefined {
     instanceId,
     token,
     clientToken: process.env['ZAPI_CLIENT_TOKEN'],
-    throwOnError: process.env['ZAPI_THROW_ON_ERROR'] === 'true',
+    throwOnError: process.env['ZAPI_THROW_ON_ERROR'] !== 'false',
     timeout: Number(process.env['ZAPI_TIMEOUT_MS'] ?? 15_000),
   };
 }
@@ -49,7 +52,7 @@ export function readMetaEnv(): MetaProviderConfig | undefined {
     wabaId: process.env['WHATSAPP_CLOUD_WABA_ID'],
     apiVersion: process.env['WHATSAPP_CLOUD_API_VERSION'] ?? 'v23.0',
     appSecret: process.env['WHATSAPP_CLOUD_APP_SECRET'],
-    throwOnError: process.env['WHATSAPP_THROW_ON_ERROR'] === 'true',
+    throwOnError: process.env['WHATSAPP_THROW_ON_ERROR'] !== 'false',
     timeout: Number(process.env['WHATSAPP_TIMEOUT_MS'] ?? 15_000),
   };
 }

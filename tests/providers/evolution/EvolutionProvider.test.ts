@@ -176,7 +176,7 @@ describe('EvolutionProvider', () => {
     );
   });
 
-  it('sendButtons sem title/footer manda string vazia (evita "*undefined*" no corpo da mensagem)', async () => {
+  it('sendButtons sem title usa fallback (evita "*undefined*" e "**" no corpo da mensagem)', async () => {
     const http = getAxios(provider);
     http['post']!.mockResolvedValueOnce({ data: {} });
 
@@ -187,7 +187,24 @@ describe('EvolutionProvider', () => {
 
     expect(http['post']).toHaveBeenCalledWith(
       '/message/sendButtons/inst-01',
-      expect.objectContaining({ title: '', footer: '' }),
+      expect.objectContaining({ title: 'Zapediu', footer: '' }),
+    );
+  });
+
+  it('sendList sem footer usa fallback em footerText (campo obrigatório na Evolution — 400 se ausente)', async () => {
+    const http = getAxios(provider);
+    http['post']!.mockResolvedValueOnce({ data: {} });
+
+    await provider.sendList('inst-01', '5598999990000', {
+      title: 'Título',
+      description: 'Descrição',
+      buttonText: 'Ver opções',
+      sections: [{ title: 'Seção 1', rows: [{ rowId: 'r1', title: 'Linha 1' }] }],
+    });
+
+    expect(http['post']).toHaveBeenCalledWith(
+      '/message/sendList/inst-01',
+      expect.objectContaining({ buttonText: 'Ver opções', footerText: 'Zapediu' }),
     );
   });
 

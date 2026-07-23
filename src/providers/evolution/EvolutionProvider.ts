@@ -46,7 +46,7 @@ export class EvolutionProvider implements CommunicationProvider {
       provider: this.name,
       axiosInstance,
       logger,
-      throwOnError: config.throwOnError ?? false,
+      throwOnError: config.throwOnError ?? true,
     });
   }
 
@@ -244,7 +244,9 @@ export class EvolutionProvider implements CommunicationProvider {
       title: content.title,
       description: content.description,
       buttonText: content.buttonText,
-      footerText: content.footer,
+      // Evolution exige footerText (400 se ausente), mas ListContent.footer é opcional pra
+      // outros providers (Meta/Z-API não têm esse requisito) — mesmo fallback de sendButtons.
+      footerText: content.footer?.trim() ? content.footer : 'Zapediu',
       sections: content.sections,
     });
     return this.toSendResult(raw);

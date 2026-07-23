@@ -57,7 +57,7 @@ export class ZApiProvider implements CommunicationProvider {
       provider: this.name,
       axiosInstance,
       logger,
-      throwOnError: config.throwOnError ?? false,
+      throwOnError: config.throwOnError ?? true,
     });
   }
 
